@@ -219,6 +219,11 @@ function renderIntegrationMarkdown(i: Integration): string {
 
 function renderSkillMarkdown(): string {
   const out: string[] = [];
+  out.push('---');
+  out.push('name: antseed-connect');
+  out.push('description: Connect coding agents, AI SDKs, and LLM tools to the AntSeed buyer proxy. Use when configuring Claude Code, Codex, OpenCode, Pi, OpenClaw, Hermes, GenLayer Studio, Vercel AI SDK, LangChain, or raw HTTP to route inference through AntSeed at localhost:8377.');
+  out.push('---');
+  out.push('');
   out.push('# AntSeed — Integration Skill');
   out.push('');
   out.push('> This file is the agent-readable companion to https://antseed.com/integrations.');
@@ -230,11 +235,16 @@ function renderSkillMarkdown(): string {
   out.push('');
   out.push('AntSeed is a peer-to-peer marketplace for AI inference. Buyers run a small');
   out.push('local daemon (the **buyer proxy**) that exposes an HTTP API at');
-  out.push('`http://localhost:8377` speaking **all four major LLM API protocols** at once:');
-  out.push('Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, and OpenAI');
-  out.push('Completions (legacy). The proxy discovers providers on a DHT, routes the');
+  out.push('`http://localhost:8377` speaking the three caller-facing LLM API protocols:');
+  out.push('Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses. Legacy');
+  out.push('OpenAI Completions is supported internally for adapter translation. The proxy');
+  out.push('discovers providers on a DHT, routes the');
   out.push('request to a peer, translates between protocols when needed (via');
   out.push('`@antseed/api-adapter`), and settles in USDC on Base.');
+  out.push('');
+  out.push('Important: AntSeed is for value-added AI services (specialized models, agents,');
+  out.push('TEEs, fine-tunes, managed workflows), not raw resale of API keys or subscription');
+  out.push('access. Providers must comply with upstream terms of service.');
   out.push('');
   out.push('From the perspective of any tool, SDK, or agent, **AntSeed is just a local');
   out.push('OpenAI/Anthropic-compatible endpoint** — point a `base_url` at it and you are done.');
@@ -262,8 +272,10 @@ function renderSkillMarkdown(): string {
   out.push('  tool schemas, prior conversation turns, long files you keep referencing. The CLI');
   out.push('  exposes it as `cachedInputUsdPerMillion`. For long-running agents and chatbots,');
   out.push('  this is often the dominant cost line.');
-  out.push('- **Pin** — telling the buyer proxy "route requests to *this* peer." There is');
-  out.push('  no auto-selection; you must pick. Two ways:');
+  out.push('- **Pin** — telling the buyer proxy "route requests to *this* peer." In the');
+  out.push('  default manual flow, there is no peer auto-selection; you must choose a peer,');
+  out.push('  send a per-request pin header, or start the proxy with a router plugin that');
+  out.push('  performs selection. Two common explicit routes:');
   out.push('  - **Session pin**: `antseed buyer connection set --peer <peerId>`. Persists in');
   out.push('    `~/.antseed/buyer.state.json` and applies to every request until you change it.');
   out.push('  - **Per-request header**: `x-antseed-pin-peer: <peerId>` on each call. Overrides');
@@ -289,6 +301,8 @@ function renderSkillMarkdown(): string {
   out.push('# 2. Identity (an EVM private key — 64 hex chars). Save this somewhere safe;');
   out.push('#    you will reuse it across machines and it controls your USDC deposits.');
   out.push('export ANTSEED_IDENTITY_HEX=$(openssl rand -hex 32)');
+  out.push('# SECURITY: never paste this key into chat, logs, GitHub issues, or a file');
+  out.push('# committed to git. It controls the buyer identity and access to deposits.');
   out.push('');
   out.push('# 3. Start the buyer proxy on :8377');
   out.push('antseed buyer start &');
@@ -339,6 +353,18 @@ function renderSkillMarkdown(): string {
   out.push('# 8. (Optional) Deposit USDC on Base for paid services');
   out.push('antseed payments  # opens portal at 127.0.0.1:3118?token=<hex> — connect a wallet, deposit USDC');
   out.push('```');
+  out.push('');
+  out.push('### Security notes for agents and deploys');
+  out.push('');
+  out.push('- Treat `ANTSEED_IDENTITY_HEX` / `~/.antseed/identity.key` as a hot wallet key.');
+  out.push('  Never print it, paste it into chat, commit it, or copy it off the buyer host.');
+  out.push('- Keep the buyer proxy bound to `127.0.0.1` / `localhost`. Do not expose');
+  out.push('  `:8377` directly to the public internet; use SSH tunnels or a private network');
+  out.push('  if another process must reach it remotely.');
+  out.push('- Start with small USDC deposits and conservative reserve caps for autonomous');
+  out.push('  agents. The funding wallet does not need to stay connected after depositing.');
+  out.push('- If a tool requires an API key, use a non-secret placeholder such as `antseed`;');
+  out.push('  the buyer proxy authenticates with the local identity key instead.');
   out.push('');
 
   out.push('## Endpoints exposed by the buyer proxy');
@@ -466,12 +492,14 @@ function renderSkillMarkdown(): string {
   out.push('1. Detect what tool the user is using.');
   out.push('2. Look it up in this file by name.');
   out.push('3. Run the **Install** steps if the tool is not present.');
-  out.push('4. Apply the **Configure** block (env vars, config file edit, or GUI instruction).');
-  out.push('5. Verify with the **Test it** command.');
-  out.push("6. Pick a peer: `antseed network browse` → `antseed network peer <peerId> --json`.");
+  out.push('4. Before editing config files, read the existing file, preserve unrelated');
+  out.push('   user settings, and merge only the AntSeed provider/profile block.');
+  out.push('5. Apply the **Configure** block (env vars, config file edit, or GUI instruction).');
+  out.push('6. Verify with the **Test it** command.');
+  out.push("7. Pick a peer: `antseed network browse` → `antseed network peer <peerId> --json`.");
   out.push("   Match the tool's wire format against the service's `protocols` array — NOT the");
   out.push('   `provider` field. Then `antseed buyer connection set --peer <peerId>`.');
-  out.push('7. If the tool is not listed: pick the **curl / Raw HTTP** entry and adapt — the');
+  out.push('8. If the tool is not listed: pick the **curl / Raw HTTP** entry and adapt — the');
   out.push('   contract is stable.');
   out.push('');
   out.push('If a step fails, read the **Troubleshooting** entries; most failures map cleanly.');

@@ -398,14 +398,14 @@ model_provider = "antseed"
     name: 'Pi',
     glyph: 'π',
     category: 'coding-agent',
-    format: 'openai-chat',
+    format: 'openai-responses',
     setupMinutes: 3,
     status: 'verified',
     oneLiner: 'Open-source terminal coding agent with a first-class AntSeed extension.',
     description: [
       '<strong>What Pi is.</strong> Pi (<code>@mariozechner/pi-coding-agent</code>) is a minimal, hackable terminal coding agent by Mario Zechner — the same lineage as <a href="https://github.com/badlogic/pi-mono">pi-mono</a>. It ships with four default tools (<code>read</code>, <code>write</code>, <code>edit</code>, <code>bash</code>) and lets you extend everything else — commands, providers, themes, even the editor UI — through TypeScript <em>extensions</em>, <em>skills</em>, and <em>prompt templates</em>. No fork required.',
       '<strong>What the AntSeed extension does.</strong> <a href="https://github.com/AntSeed/pi-antseed"><code>pi-antseed</code></a> is a Pi extension that registers the local buyer proxy as a Pi provider named <code>antseed</code>. Once installed, every service your pinned peer advertises shows up under <code>antseed/&lt;id&gt;</code> in Pi\'s model picker (Ctrl+L or <code>/model</code>) — you switch with <code>/model antseed/minimax-m2.7</code> just like any built-in.',
-      '<strong>Why an extension instead of env vars.</strong> Pi already speaks dozens of provider protocols natively. The extension calls <code>pi.registerProvider("antseed", { api: "openai-completions", authHeader: true, baseURL: "http://localhost:8377/v1" })</code> — Pi then handles auth headers, streaming, retries, and tool-calling. The extension also auto-refreshes the model list from <code>GET /v1/models</code>, so the menu always reflects what your pinned peer can actually serve.',
+      '<strong>Why an extension instead of env vars.</strong> Pi already speaks dozens of provider protocols natively. The extension calls <code>pi.registerProvider("antseed", { api: "openai-responses", authHeader: true, baseUrl: "http://localhost:8377/v1" })</code> — Pi then handles auth headers, streaming, retries, and tool-calling. The Responses API path preserves reasoning items across turns for reasoning-capable models, while the extension still auto-refreshes the model list from <code>GET /v1/models</code> so the menu reflects what your pinned peer can serve.',
     ],
     install: [
       {
@@ -503,7 +503,7 @@ model_provider = "antseed"
       { label: 'pi-antseed extension', href: 'https://github.com/AntSeed/pi-antseed' },
     ],
     agentSummary:
-      'Install Pi: `npm install -g @mariozechner/pi-coding-agent`. Install the AntSeed extension: `pi install git:github.com/AntSeed/pi-antseed`. Restart or `/reload`. The extension calls `pi.registerProvider("antseed", { api: "openai-completions", baseURL: "http://localhost:8377/v1" })` and auto-discovers models from the pinned peer via GET /v1/models. Switch with `/model antseed/<service-id>`. Override base URL with `ANTSEED_BASE_URL` env var; auth with `ANTSEED_API_KEY`.',
+      'Install Pi: `npm install -g @mariozechner/pi-coding-agent`. Install the AntSeed extension: `pi install git:github.com/AntSeed/pi-antseed`. Restart or `/reload`. The extension calls `pi.registerProvider("antseed", { api: "openai-responses", baseUrl: "http://localhost:8377/v1" })` and auto-discovers models from the pinned peer via GET /v1/models. Switch with `/model antseed/<service-id>`. Override base URL with `ANTSEED_BASE_URL` env var; auth with `ANTSEED_API_KEY`.',
   },
 
   /* ---------------- Autonomous agents ---------------- */
@@ -722,7 +722,7 @@ auxiliary:
       {
         problem: 'Hermes loads the provider but every call returns `no_peer_pinned`',
         fix:
-          'AntSeed never auto-selects — you have to pin a peer. Run `antseed network browse`, pick one, then `antseed buyer connection set --peer <peerId>`. The pin survives buyer-proxy restarts (it\'s persisted to `~/.antseed/buyer.state.json`).',
+          'In the default manual flow AntSeed does not auto-select a peer — pin one with `antseed buyer connection set --peer <peerId>`, send `x-antseed-pin-peer` per request, or start the buyer with a router plugin. The session pin survives buyer-proxy restarts (it\'s persisted to `~/.antseed/buyer.state.json`).',
       },
       {
         problem: 'Hermes runs on a remote host and can\'t reach `127.0.0.1:8377`',
