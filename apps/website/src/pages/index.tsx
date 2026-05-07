@@ -356,7 +356,7 @@ export default function Home(): JSX.Element {
                 <p>Sort coding providers by model, price, latency, or reputation — then plug your tools into one local endpoint.</p>
                 <code>localhost:8377/v1</code>
               </div>
-              <Link to="/connect" className={styles.entryCta}>Connect</Link>
+              <Link to="/integrations" className={styles.entryCta}>Connect</Link>
             </article>
 
             <article className={styles.entryCard}>
@@ -366,11 +366,11 @@ export default function Home(): JSX.Element {
               </div>
               <div className={styles.entryContent}>
                 <span>Agents</span>
-                <h3>Connect your agent</h3>
+                <h3>Integrate your agent</h3>
                 <p>Let agents sort providers by task, price, latency, reputation, capability, or Private Provider routes.</p>
                 <div className={styles.entryBadges}><b>cheap</b><b>fast</b><b>reliable</b></div>
               </div>
-              <Link to="/connect" className={styles.entryCta}>Connect</Link>
+              <Link to="/integrations" className={styles.entryCta}>Integrate</Link>
             </article>
           </div>
         </div>
@@ -446,7 +446,7 @@ export default function Home(): JSX.Element {
             <li>Compare price, latency, and reputation before routing</li>
             <li>Works with normal SDKs, CLIs, and editor plugins</li>
           </ul>
-          <Link to="/connect" className={styles.pathPrimaryBtn}>Connect CLI →</Link>
+          <Link to="/integrations" className={styles.pathPrimaryBtn}>Connect CLI →</Link>
         </div>
       </section>
 
@@ -472,7 +472,7 @@ export default function Home(): JSX.Element {
             <li>Specialist AI agents for packaged expertise and tools</li>
             <li>USDC settlement without platform custody</li>
           </ul>
-          <Link to="/connect" className={styles.pathPrimaryBtn}>Connect →</Link>
+          <Link to="/integrations" className={styles.pathPrimaryBtn}>Integrate →</Link>
         </div>
         <div className={styles.agentAnimation} aria-label="Agent provider routing animation">
           <div className={styles.orbitRing} />
@@ -526,12 +526,12 @@ export default function Home(): JSX.Element {
           <div className={styles.bottomCard}>
             <h3>Connect your CLI</h3>
             <p>Point Claude Code, Codex, VS Code, or any OpenAI-compatible tool at your local AntSeed endpoint.</p>
-            <Link to="/connect" className={styles.bottomBtn}>Connect a tool →</Link>
+            <Link to="/integrations" className={styles.bottomBtn}>Connect a tool →</Link>
           </div>
           <div className={styles.bottomCard}>
             <h3>Build with agents</h3>
             <p>Route tasks by model quality, price, latency, privacy, and on-chain reputation.</p>
-            <Link to="/connect" className={styles.bottomBtn}>Connect agents →</Link>
+            <Link to="/integrations" className={styles.bottomBtn}>Integrate an agent →</Link>
           </div>
         </div>
       </section>

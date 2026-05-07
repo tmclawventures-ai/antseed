@@ -13,7 +13,7 @@ import {
   type ConfigBlock,
   type Step,
 } from './integrations';
-import styles from './connect.module.css';
+import styles from './integrations.module.css';
 
 function CopyButton({value}: {value: string}) {
   const [copied, setCopied] = useState(false);
@@ -603,7 +603,7 @@ export default function IntegrationPage({integration}: {integration: Integration
 
       <article className={styles.detailWrap}>
         <nav className={styles.breadcrumb}>
-          <Link to="/connect">Connect</Link> <span className={styles.breadcrumbSep}>/</span>{' '}
+          <Link to="/integrations">Integrations</Link> <span className={styles.breadcrumbSep}>/</span>{' '}
           <span>{i.name}</span>
         </nav>
 
@@ -734,9 +734,9 @@ export default function IntegrationPage({integration}: {integration: Integration
             <h2 className={styles.sectionTitle}>Related</h2>
             <div className={styles.relatedRow}>
               {related.map((r) => (
-                <Link key={r.slug} to={`/connect/${r.slug}`}>{r.name}</Link>
+                <Link key={r.slug} to={`/integrations/${r.slug}`}>{r.name}</Link>
               ))}
-              <Link to="/connect">All integrations →</Link>
+              <Link to="/integrations">All integrations →</Link>
             </div>
           </section>
         )}

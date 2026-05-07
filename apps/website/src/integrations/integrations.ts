@@ -1,14 +1,14 @@
 /**
  * Single source of truth for AntSeed integration entries.
  *
- * Both `/connect` (the public hub) and `/skill.md` (the agent-readable guide)
- * are generated from this file. The desktop app's "External clients" view
- * should also migrate to this list — see TODO in
+ * Both `/integrations` (the public hub) and `/skill.md` (the agent-readable
+ * guide) are generated from this file. The desktop app's "External clients"
+ * view should also migrate to this list — see TODO in
  * apps/desktop/src/renderer/ui/components/views/ExternalClientsView.tsx.
  *
  * When adding a new tool / SDK / partner, add an entry below and the page
- * appears at /connect/<slug> automatically (the route is registered by
- * apps/website/plugins/connect-pages.ts).
+ * appears at /integrations/<slug> automatically (the route is registered by
+ * apps/website/plugins/integrations-pages.ts).
  */
 
 /**

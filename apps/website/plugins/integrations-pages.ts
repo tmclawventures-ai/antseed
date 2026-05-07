@@ -1,7 +1,7 @@
 /**
  * Docusaurus plugin that:
- *   1. Registers a route at /connect/<slug> for every integration in
- *      src/connect/integrations.ts.
+ *   1. Registers a route at /integrations/<slug> for every integration in
+ *      src/integrations/integrations.ts.
  *   2. Generates /skill.md (and /llms-connect.txt) at build time so agents and
  *      LLM crawlers can ingest the integration catalog without scraping HTML.
  *
@@ -22,7 +22,7 @@ import {
   type IntegrationFormat,
   type ConfigBlock,
   type Step,
-} from '../src/connect/integrations';
+} from '../src/integrations/integrations';
 
 /**
  * Strip a small set of inline HTML tags we use in `description` strings so the
@@ -150,7 +150,7 @@ function renderIntegrationMarkdown(i: Integration): string {
   lines.push(`- **Category:** ${CATEGORY_LABELS[i.category]}`);
   lines.push(`- **Wire format:** ${FORMAT_LABELS[i.format]}`);
   lines.push(`- **Setup time:** ~${i.setupMinutes} min`);
-  lines.push(`- **Page:** https://antseed.com/connect/${i.slug}`);
+  lines.push(`- **Page:** https://antseed.com/integrations/${i.slug}`);
   if (i.agentSummary) {
     lines.push('');
     lines.push(`**TL;DR for agents:** ${i.agentSummary}`);
@@ -221,7 +221,7 @@ function renderSkillMarkdown(): string {
   const out: string[] = [];
   out.push('# AntSeed — Integration Skill');
   out.push('');
-  out.push('> This file is the agent-readable companion to https://antseed.com/connect.');
+  out.push('> This file is the agent-readable companion to https://antseed.com/integrations.');
   out.push('> It tells any AI agent (Claude, Codex, OpenClaw, Hermes, custom) exactly');
   out.push('> how to wire its tool of choice up to the AntSeed peer-to-peer inference network.');
   out.push('');
@@ -479,8 +479,8 @@ function renderSkillMarkdown(): string {
 
   out.push('## Adding a new integration');
   out.push('');
-  out.push('Edit `apps/website/src/connect/integrations.ts` in');
-  out.push('https://github.com/AntSeed/antseed and open a PR. The hub at /connect, the');
+  out.push('Edit `apps/website/src/integrations/integrations.ts` in');
+  out.push('https://github.com/AntSeed/antseed and open a PR. The hub at /integrations, the');
   out.push('per-tool page, and this skill.md are all generated from that single file.');
   out.push('');
   return out.join('\n');
@@ -488,7 +488,7 @@ function renderSkillMarkdown(): string {
 
 export default function connectPagesPlugin(context: LoadContext): Plugin {
   return {
-    name: 'connect-pages',
+    name: 'integrations-pages',
 
     async loadContent() {
       // Generate skill.md into static/ so it is served at /skill.md in both
@@ -505,14 +505,14 @@ export default function connectPagesPlugin(context: LoadContext): Plugin {
     async contentLoaded({actions}) {
       const {addRoute, createData} = actions;
 
-      // For every integration, register a route /connect/<slug> that
-      // renders src/connect/IntegrationPage.tsx with that integration as
-      // a prop. The hub at /connect itself comes from src/pages/connect.tsx.
+      // For every integration, register a route /integrations/<slug> that
+      // renders src/integrations/IntegrationPage.tsx with that integration as
+      // a prop. The hub at /integrations itself comes from src/pages/integrations.tsx.
       for (const i of integrations) {
         const slugData = await createData(`integration-${i.slug}.json`, JSON.stringify(i));
         addRoute({
-          path: `/connect/${i.slug}`,
-          component: '@site/src/connect/IntegrationPage.tsx',
+          path: `/integrations/${i.slug}`,
+          component: '@site/src/integrations/IntegrationPage.tsx',
           modules: {integration: slugData},
           exact: true,
         });

@@ -10,8 +10,8 @@ import {
   STATUS_LABELS,
   type IntegrationCategory,
   type Integration,
-} from '../connect/integrations';
-import styles from '../connect/connect.module.css';
+} from '../integrations/integrations';
+import styles from '../integrations/integrations.module.css';
 
 /* --------------------------- Category icons --------------------------- *
  * Inline SVG, ~20x20, stroke-based. Centralized so we don't sprinkle
@@ -74,7 +74,7 @@ function CategoryIcon({category}: {category: IntegrationCategory}) {
 
 function IntegrationCard({i}: {i: Integration}) {
   return (
-    <Link to={`/connect/${i.slug}`} className={styles.card}>
+    <Link to={`/integrations/${i.slug}`} className={styles.card}>
       <div className={styles.cardHead}>
         <div className={styles.logoWrap}>
           {i.logo ? (
@@ -181,7 +181,7 @@ export default function ConnectHub(): JSX.Element {
 
   return (
     <Layout
-      title="Connect — AntSeed"
+      title="Integrations — AntSeed"
       description="Every way to use AntSeed: coding agents, autonomous agents, editors, SDKs, frameworks, partner platforms. Anthropic and OpenAI compatible. Drop-in via localhost:8377.">
       <Head>
         <link
@@ -193,7 +193,7 @@ export default function ConnectHub(): JSX.Element {
       </Head>
 
       <section className={styles.hero}>
-        <span className={styles.kicker}>Connect</span>
+        <span className={styles.kicker}>Integrations</span>
         <h1 className={styles.heroTitle}>One local endpoint. Every tool you already use.</h1>
         <p className={styles.heroSub}>
           AntSeed runs a buyer proxy at <code>http://localhost:8377</code> that speaks{' '}
@@ -253,7 +253,7 @@ export default function ConnectHub(): JSX.Element {
         {totalShown === 0 ? (
           <p className={styles.noResults}>
             No matches for <strong>{query}</strong>. Try the{' '}
-            <Link to="/connect/curl">raw HTTP page</Link> — anything that speaks Anthropic or
+            <Link to="/integrations/curl">raw HTTP page</Link> — anything that speaks Anthropic or
             OpenAI works.
           </p>
         ) : (
@@ -268,10 +268,10 @@ export default function ConnectHub(): JSX.Element {
           <h3>Don't see your tool?</h3>
           <p>
             If your tool accepts an Anthropic or OpenAI base URL, AntSeed already works with
-            it — see the <Link to="/connect/curl">raw HTTP page</Link> for the contract. Want
+            it — see the <Link to="/integrations/curl">raw HTTP page</Link> for the contract. Want
             it added here? Open a PR on{' '}
             <a
-              href="https://github.com/AntSeed/antseed/blob/main/apps/website/src/connect/integrations.ts"
+              href="https://github.com/AntSeed/antseed/blob/main/apps/website/src/integrations/integrations.ts"
               target="_blank"
               rel="noopener noreferrer">
               integrations.ts
