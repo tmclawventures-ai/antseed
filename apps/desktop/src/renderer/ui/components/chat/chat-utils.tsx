@@ -48,33 +48,63 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '');
 }
 
+function isSearchWordChar(char: string | undefined): boolean {
+  return Boolean(char && /[\p{L}\p{N}_]/u.test(char));
+}
+
+export function findSearchPhraseMatches(text: string, query: string | undefined): Array<{ start: number; end: number }> {
+  const trimmedQuery = query?.trim();
+  if (!trimmedQuery) return [];
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = trimmedQuery.toLowerCase();
+  const matches: Array<{ start: number; end: number }> = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const start = lowerText.indexOf(lowerQuery, cursor);
+    if (start === -1) break;
+    const end = start + trimmedQuery.length;
+    const startsInsideWord = isSearchWordChar(text[start - 1]) && isSearchWordChar(text[start]);
+    const endsInsideWord = isSearchWordChar(text[end - 1]) && isSearchWordChar(text[end]);
+
+    if (!startsInsideWord && !endsInsideWord) {
+      matches.push({ start, end });
+    }
+
+    cursor = end;
+  }
+
+  return matches;
+}
+
+export function hasSearchPhraseMatch(text: string, query: string | undefined): boolean {
+  return findSearchPhraseMatches(text, query).length > 0;
+}
+
 function splitHighlightedText(text: string, query: string | undefined, keyPrefix: string, activeHighlight = false): ReactNode {
   const trimmedQuery = query?.trim();
   if (!trimmedQuery) return text;
 
-  const lowerText = text.toLowerCase();
-  const lowerQuery = trimmedQuery.toLowerCase();
+  const matches = findSearchPhraseMatches(text, trimmedQuery);
+  if (matches.length === 0) return text;
+
   const parts: ReactNode[] = [];
   let cursor = 0;
-  let matchIndex = 0;
 
-  while (cursor < text.length) {
-    const index = lowerText.indexOf(lowerQuery, cursor);
-    if (index === -1) break;
-    if (index > cursor) parts.push(text.slice(cursor, index));
+  matches.forEach((match, matchIndex) => {
+    if (match.start > cursor) parts.push(text.slice(cursor, match.start));
     parts.push(
       <mark
         key={`${keyPrefix}-mark-${matchIndex}`}
         className={`chat-search-mark${activeHighlight ? ' chat-search-mark-active' : ''}`}
       >
-        {text.slice(index, index + trimmedQuery.length)}
+        {text.slice(match.start, match.end)}
       </mark>,
     );
-    cursor = index + trimmedQuery.length;
-    matchIndex += 1;
-  }
+    cursor = match.end;
+  });
 
-  if (matchIndex === 0) return text;
   if (cursor < text.length) parts.push(text.slice(cursor));
   return <>{parts}</>;
 }

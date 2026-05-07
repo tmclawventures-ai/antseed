@@ -15,7 +15,7 @@ import {
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
 import { useActions } from '../../hooks/useActions';
 import { ChatBubble } from '../chat/ChatBubble';
-import { isToolResultOnlyMessage } from '../chat/chat-utils.js';
+import { hasSearchPhraseMatch, isToolResultOnlyMessage } from '../chat/chat-utils.js';
 import { WalkingAnt } from '../chat/WalkingAnt';
 import { SessionApprovalCard } from '../chat/SessionApprovalCard';
 import { LowBalanceWarning } from '../chat/LowBalanceWarning';
@@ -226,7 +226,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const messageSearchResults = useMemo(() => {
     if (!normalizedMessageSearchQuery) return [];
     return keyedVisibleMessages
-      .filter(({ message }) => getSearchableMessageText(message).toLowerCase().includes(normalizedMessageSearchQuery))
+      .filter(({ message }) => hasSearchPhraseMatch(getSearchableMessageText(message), normalizedMessageSearchQuery))
       .map(({ key }) => key);
   }, [keyedVisibleMessages, normalizedMessageSearchQuery]);
   const activeSearchResultKey = messageSearchResults[selectedSearchIndex] || null;
