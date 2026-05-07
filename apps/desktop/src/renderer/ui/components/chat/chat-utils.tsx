@@ -7,6 +7,7 @@ import { isToolResultOnlyMessage as isToolResultOnlyMessageShared } from './chat
 type MarkdownContentProps = {
   text: string;
   className?: string;
+  highlightQuery?: string;
 };
 
 type MarkdownToken = {
@@ -46,6 +47,34 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '');
 }
 
+function splitHighlightedText(text: string, query: string | undefined, keyPrefix: string): ReactNode {
+  const trimmedQuery = query?.trim();
+  if (!trimmedQuery) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = trimmedQuery.toLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = 0;
+
+  while (cursor < text.length) {
+    const index = lowerText.indexOf(lowerQuery, cursor);
+    if (index === -1) break;
+    if (index > cursor) parts.push(text.slice(cursor, index));
+    parts.push(
+      <mark key={`${keyPrefix}-mark-${matchIndex}`} className="chat-search-mark">
+        {text.slice(index, index + trimmedQuery.length)}
+      </mark>,
+    );
+    cursor = index + trimmedQuery.length;
+    matchIndex += 1;
+  }
+
+  if (matchIndex === 0) return text;
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
+
 function flattenPlainText(tokens: MarkdownToken[] | undefined): string {
   if (!Array.isArray(tokens) || tokens.length === 0) return '';
   let output = '';
@@ -63,37 +92,37 @@ function flattenPlainText(tokens: MarkdownToken[] | undefined): string {
   return output;
 }
 
-function renderInlineTokens(tokens: MarkdownToken[] | undefined, keyPrefix: string): ReactNode[] {
+function renderInlineTokens(tokens: MarkdownToken[] | undefined, keyPrefix: string, highlightQuery?: string): ReactNode[] {
   if (!Array.isArray(tokens) || tokens.length === 0) return [];
-  return tokens.map((token, index) => renderInlineToken(token, `${keyPrefix}-${index}`));
+  return tokens.map((token, index) => renderInlineToken(token, `${keyPrefix}-${index}`, highlightQuery));
 }
 
-function renderInlineToken(token: MarkdownToken, key: string): ReactNode {
+function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: string): ReactNode {
   switch (token.type) {
     case 'text':
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
-        return <Fragment key={key}>{renderInlineTokens(token.tokens, key)}</Fragment>;
+        return <Fragment key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</Fragment>;
       }
-      return <Fragment key={key}>{normalizeText(token.text)}</Fragment>;
+      return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text), highlightQuery, key)}</Fragment>;
     case 'escape':
-      return <Fragment key={key}>{normalizeText(token.text)}</Fragment>;
+      return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text), highlightQuery, key)}</Fragment>;
     case 'strong':
-      return <strong key={key}>{renderInlineTokens(token.tokens, key)}</strong>;
+      return <strong key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</strong>;
     case 'em':
-      return <em key={key}>{renderInlineTokens(token.tokens, key)}</em>;
+      return <em key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</em>;
     case 'codespan':
       return (
         <code key={key} className="chat-inline-code">
-          {normalizeText(token.text)}
+          {splitHighlightedText(normalizeText(token.text), highlightQuery, key)}
         </code>
       );
     case 'br':
       return <br key={key} />;
     case 'del':
-      return <del key={key}>{renderInlineTokens(token.tokens, key)}</del>;
+      return <del key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</del>;
     case 'link': {
       const href = normalizeText(token.href);
-      const content = renderInlineTokens(token.tokens, key);
+      const content = renderInlineTokens(token.tokens, key, highlightQuery);
       if (!isSafeHref(href)) {
         return (
           <span key={key} className="chat-inline-link-invalid">
@@ -128,36 +157,36 @@ function renderInlineToken(token: MarkdownToken, key: string): ReactNode {
     }
     default:
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
-        return <Fragment key={key}>{renderInlineTokens(token.tokens, key)}</Fragment>;
+        return <Fragment key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</Fragment>;
       }
-      return <Fragment key={key}>{normalizeText(token.text ?? token.raw)}</Fragment>;
+      return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key)}</Fragment>;
   }
 }
 
-function renderBlockTokens(tokens: MarkdownToken[], keyPrefix: string): ReactNode[] {
-  return tokens.map((token, index) => renderBlockToken(token, `${keyPrefix}-${index}`));
+function renderBlockTokens(tokens: MarkdownToken[], keyPrefix: string, highlightQuery?: string): ReactNode[] {
+  return tokens.map((token, index) => renderBlockToken(token, `${keyPrefix}-${index}`, highlightQuery));
 }
 
-function renderTableCell(token: MarkdownToken, key: string): ReactNode {
+function renderTableCell(token: MarkdownToken, key: string, highlightQuery?: string): ReactNode {
   if (Array.isArray(token.tokens) && token.tokens.length > 0) {
-    return <Fragment key={key}>{renderInlineTokens(token.tokens, key)}</Fragment>;
+    return <Fragment key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</Fragment>;
   }
-  return <Fragment key={key}>{normalizeText(token.text ?? token.raw)}</Fragment>;
+  return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key)}</Fragment>;
 }
 
-function renderListItemContent(token: MarkdownToken, key: string): ReactNode {
+function renderListItemContent(token: MarkdownToken, key: string, highlightQuery?: string): ReactNode {
   if (Array.isArray(token.tokens) && token.tokens.length > 0) {
     const hasBlockTokens = token.tokens.some((child) =>
       ['paragraph', 'space', 'text', 'strong', 'em', 'codespan', 'link', 'del', 'br'].includes(child.type) === false);
     if (hasBlockTokens) {
-      return <>{renderBlockTokens(token.tokens, key)}</>;
+      return <>{renderBlockTokens(token.tokens, key, highlightQuery)}</>;
     }
-    return <>{renderInlineTokens(token.tokens, key)}</>;
+    return <>{renderInlineTokens(token.tokens, key, highlightQuery)}</>;
   }
-  return normalizeText(token.text ?? token.raw);
+  return splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key);
 }
 
-function CodeBlock({ code, lang }: { code: string; lang?: string }) {
+function CodeBlock({ code, lang, highlightQuery }: { code: string; lang?: string; highlightQuery?: string }) {
   const [copied, setCopied] = useState(false);
   const langLabel = normalizeText(lang).trim() || 'code';
 
@@ -177,26 +206,26 @@ function CodeBlock({ code, lang }: { code: string; lang?: string }) {
         </button>
       </div>
       <pre>
-        <code>{code}</code>
+        <code>{splitHighlightedText(code, highlightQuery, 'code')}</code>
       </pre>
     </div>
   );
 }
 
-function renderBlockToken(token: MarkdownToken, key: string): ReactNode {
+function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: string): ReactNode {
   switch (token.type) {
     case 'space':
       return null;
     case 'paragraph':
-      return <p key={key}>{renderInlineTokens(token.tokens, key)}</p>;
+      return <p key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</p>;
     case 'text':
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
-        return <p key={key}>{renderInlineTokens(token.tokens, key)}</p>;
+        return <p key={key}>{renderInlineTokens(token.tokens, key, highlightQuery)}</p>;
       }
-      return <p key={key}>{normalizeText(token.text)}</p>;
+      return <p key={key}>{splitHighlightedText(normalizeText(token.text), highlightQuery, key)}</p>;
     case 'heading': {
       const depth = Math.min(Math.max(Number(token.depth) || 1, 1), 6);
-      const children = renderInlineTokens(token.tokens, key);
+      const children = renderInlineTokens(token.tokens, key, highlightQuery);
       if (depth === 1) return <h1 key={key}>{children}</h1>;
       if (depth === 2) return <h2 key={key}>{children}</h2>;
       if (depth === 3) return <h3 key={key}>{children}</h3>;
@@ -205,9 +234,9 @@ function renderBlockToken(token: MarkdownToken, key: string): ReactNode {
       return <h6 key={key}>{children}</h6>;
     }
     case 'code':
-      return <CodeBlock key={key} code={normalizeText(token.text)} lang={token.lang} />;
+      return <CodeBlock key={key} code={normalizeText(token.text)} lang={token.lang} highlightQuery={highlightQuery} />;
     case 'blockquote':
-      return <blockquote key={key}>{renderBlockTokens(token.tokens ?? [], key)}</blockquote>;
+      return <blockquote key={key}>{renderBlockTokens(token.tokens ?? [], key, highlightQuery)}</blockquote>;
     case 'hr':
       return <hr key={key} />;
     case 'list': {
@@ -219,10 +248,10 @@ function renderBlockToken(token: MarkdownToken, key: string): ReactNode {
               {item.task ? (
                 <label className="chat-task-item">
                   <input type="checkbox" checked={Boolean(item.checked)} readOnly />
-                  <span>{renderListItemContent(item, `${key}-task-${index}`)}</span>
+                  <span>{renderListItemContent(item, `${key}-task-${index}`, highlightQuery)}</span>
                 </label>
               ) : (
-                renderListItemContent(item, `${key}-item-content-${index}`)
+                renderListItemContent(item, `${key}-item-content-${index}`, highlightQuery)
               )}
             </li>
           ))}
@@ -237,7 +266,7 @@ function renderBlockToken(token: MarkdownToken, key: string): ReactNode {
               <tr>
                 {(token.header ?? []).map((cell, index) => (
                   <th key={`${key}-head-${index}`} align={token.align?.[index] ?? undefined}>
-                    {renderTableCell(cell, `${key}-head-cell-${index}`)}
+                    {renderTableCell(cell, `${key}-head-cell-${index}`, highlightQuery)}
                   </th>
                 ))}
               </tr>
@@ -247,7 +276,7 @@ function renderBlockToken(token: MarkdownToken, key: string): ReactNode {
                 <tr key={`${key}-row-${rowIndex}`}>
                   {row.map((cell, cellIndex) => (
                     <td key={`${key}-row-${rowIndex}-cell-${cellIndex}`} align={token.align?.[cellIndex] ?? undefined}>
-                      {renderTableCell(cell, `${key}-row-${rowIndex}-cell-content-${cellIndex}`)}
+                      {renderTableCell(cell, `${key}-row-${rowIndex}-cell-content-${cellIndex}`, highlightQuery)}
                     </td>
                   ))}
                 </tr>
@@ -258,13 +287,13 @@ function renderBlockToken(token: MarkdownToken, key: string): ReactNode {
       );
     default:
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
-        return <Fragment key={key}>{renderBlockTokens(token.tokens, key)}</Fragment>;
+        return <Fragment key={key}>{renderBlockTokens(token.tokens, key, highlightQuery)}</Fragment>;
       }
-      return <p key={key}>{normalizeText(token.text ?? token.raw)}</p>;
+      return <p key={key}>{splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key)}</p>;
   }
 }
 
-export function MarkdownContent({ text, className = 'chat-bubble-content' }: MarkdownContentProps) {
+export function MarkdownContent({ text, className = 'chat-bubble-content', highlightQuery }: MarkdownContentProps) {
   const tokens = useMemo(() => Lexer.lex(text, { gfm: true, breaks: true }) as MarkdownToken[], [text]);
-  return <div className={className}>{renderBlockTokens(tokens, 'md')}</div>;
+  return <div className={className}>{renderBlockTokens(tokens, 'md', highlightQuery)}</div>;
 }

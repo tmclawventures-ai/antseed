@@ -905,7 +905,6 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
             ) : (
               keyedVisibleMessages.map(({ message: msg, key }) => {
                 const isSearchMatch = messageSearchResults.includes(key);
-                const isActiveSearchMatch = activeSearchResultKey === key;
                 return (
                   <div
                     key={key}
@@ -913,12 +912,12 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                       if (node) messageRefs.current.set(key, node);
                       else messageRefs.current.delete(key);
                     }}
-                    className={`${styles.messageSearchShell}${isSearchMatch ? ` ${styles.messageSearchMatch}` : ''}${isActiveSearchMatch ? ` ${styles.messageSearchMatchActive}` : ''}`}
                   >
                     <ChatBubble
                       message={msg}
                       onOpenPreview={handleOpenPreview}
                       conversationId={snap.chatActiveConversation || undefined}
+                      searchQuery={isSearchMatch ? messageSearchQuery : undefined}
                     />
                   </div>
                 );

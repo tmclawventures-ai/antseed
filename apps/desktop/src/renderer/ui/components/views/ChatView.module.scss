@@ -377,20 +377,6 @@
   }
 }
 
-.message-search-shell {
-  border-radius: calc(var(--radius) + 4px);
-  transition: box-shadow 0.16s ease, background 0.16s ease;
-}
-
-.message-search-match {
-  background: rgba(245, 158, 11, 0.06);
-  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3), 0 0 0 5px rgba(245, 158, 11, 0.05);
-}
-
-.message-search-match-active {
-  background: rgba(245, 158, 11, 0.1);
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.8), 0 0 0 7px rgba(245, 158, 11, 0.08);
-}
 
 .chat-empty {
   color: var(--text-muted);
