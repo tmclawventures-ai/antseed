@@ -150,6 +150,7 @@ export function initChatModule({
   const streamTurnsByConversation = new Map<string, number>();
   const streamStartedAtByConversation = new Map<string, number>();
   const streamCompletedAtByConversation = new Map<string, number>();
+  const streamFailedAtByConversation = new Map<string, number>();
   const localConversationMessages = new Map<string, ChatMessage[]>();
   const streamingMessagesByConversation = new Map<string, ChatMessage>();
   let newChatDraftVersion = 0;
@@ -1943,6 +1944,7 @@ export function initChatModule({
     const selection = selectionOverride ?? getSelectedChatServiceSelection();
     const requestStartedAt = Date.now();
     streamCompletedAtByConversation.delete(convId);
+    streamFailedAtByConversation.delete(convId);
 
     if (!selection.id) {
       reportChatError('No service is selected for this conversation.', 'Request failed');
@@ -1977,7 +1979,10 @@ export function initChatModule({
           }
 
           if (!result.ok) {
-            if ((streamCompletedAtByConversation.get(convId) ?? 0) >= requestStartedAt) {
+            if (
+              (streamCompletedAtByConversation.get(convId) ?? 0) >= requestStartedAt
+              || (streamFailedAtByConversation.get(convId) ?? 0) >= requestStartedAt
+            ) {
               clearPaymentRetry(convId);
               setConversationSending(convId, false);
               return;
@@ -1998,6 +2003,9 @@ export function initChatModule({
               // finalized the partial message. Don't overwrite with an error.
               clearPaymentRetry(convId);
               setConversationSending(convId, false);
+            } else if (result.stopReason?.retryable === false) {
+              reportChatError(result.stopReason.message || result.error, 'Request failed');
+              setConversationSending(convId, false);
             } else {
               scheduleChatRetry(
                 { convId, content, attachments, selection },
@@ -2008,7 +2016,10 @@ export function initChatModule({
             }
           }
         } catch (err) {
-          if ((streamCompletedAtByConversation.get(convId) ?? 0) >= requestStartedAt) {
+          if (
+            (streamCompletedAtByConversation.get(convId) ?? 0) >= requestStartedAt
+            || (streamFailedAtByConversation.get(convId) ?? 0) >= requestStartedAt
+          ) {
             clearPaymentRetry(convId);
             setConversationSending(convId, false);
             return;
@@ -2665,6 +2676,7 @@ export function initChatModule({
           }
         }
         setConversationStreamingMessage(data.conversationId, null);
+        streamFailedAtByConversation.set(data.conversationId, Date.now());
 
         if (data.conversationId === uiState.chatActiveConversation) {
           // Ensure the waiting-for-stream flag is cleared even if the error fires
@@ -2684,6 +2696,9 @@ export function initChatModule({
             if (paymentMatch) {
               void handlePaymentRequired(paymentMatch[1], { convId: data.conversationId });
               if (bridge.chatAiAbort) void bridge.chatAiAbort(data.conversationId).catch(() => {});
+            } else if (stopReason?.retryable === false) {
+              clearPaymentRetry(data.conversationId);
+              reportChatError(stopReason.message || data.error, 'Request failed');
             } else {
               scheduleChatRetry(
                 { convId: data.conversationId },
