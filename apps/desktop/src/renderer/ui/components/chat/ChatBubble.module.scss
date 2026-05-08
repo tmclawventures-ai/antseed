@@ -21,16 +21,16 @@
     }
 
     .chat-search-mark {
-      padding: 0 2px;
-      border-radius: 3px;
-      background: rgba(245, 158, 11, 0.32);
+      padding: 0 1px;
+      border-radius: 2px;
+      background: rgba(250, 204, 21, 0.38);
       color: inherit;
-      box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.36);
+      box-shadow: none;
     }
 
     .chat-search-mark-active {
-      background: rgba(16, 185, 129, 0.28);
-      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.78), 0 0 0 6px rgba(16, 185, 129, 0.12);
+      background: rgba(251, 191, 36, 0.62);
+      box-shadow: inset 0 -2px 0 rgba(217, 119, 6, 0.55);
     }
 
     .chat-bubble-content h1,
