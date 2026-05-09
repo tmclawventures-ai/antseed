@@ -260,15 +260,12 @@ function formatHumanAgeMs(ms: number): string {
 }
 
 /**
- * Mark a peer as "vouched" when it has clean on-chain history and enough
- * reputation to avoid contradicting the score column. Rendered as a ✓ next to
- * its peer id in the table.
+ * Mark a peer as "vouched" when its reputation score is high enough to avoid
+ * contradicting the score column. Rendered as a ✓ next to its peer id in the table.
  */
 function isPeerVouched(peer: PeerInfo): boolean {
-  const channels = peer.onChainChannelCount ?? 0;
-  const ghosts = peer.onChainGhostCount ?? 0;
   const score = effectiveOnChainReputationScore(peer) ?? 0;
-  return channels > 0 && ghosts === 0 && score >= 10;
+  return score >= 10;
 }
 
 function sortPeers(peers: PeerInfo[], sortKey: PeerSortKey): PeerInfo[] {
