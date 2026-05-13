@@ -1768,7 +1768,7 @@ export function registerPiChatHandlers({
       cwd: chatWorkspaceDir,
       agentDir: CHAT_AGENT_DIR,
       settingsManager,
-      systemPrompt: buildAntstationSystemPrompt(userSystemPrompt),
+      systemPrompt: buildAntstationSystemPrompt(userSystemPrompt, chatWorkspaceDir),
     });
     await resourceLoader.reload();
 
