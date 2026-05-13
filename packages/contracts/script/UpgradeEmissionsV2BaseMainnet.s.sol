@@ -27,7 +27,6 @@ interface IANTSTokenAdmin {
  *   ANTSEED_REGISTRY       Deployed AntseedRegistry address.
  *
  * Optional env:
- *   BUYER_CAP_PCT          Defaults to 5 for future epoch snapshots.
  *   SELLER_UNLOCK_POLICY   Existing unlock policy. If unset, this script deploys one.
  *   DIEM_PROXY_SELLER      Optional seller/proxy address to make immediately claimable.
  *   WHITELIST_REWARDS_POOL Defaults to false. Enable later when seller claims should be transferable.
@@ -92,9 +91,7 @@ contract UpgradeEmissionsV2BaseMainnet is Script {
 
         emissionsV2.setSellerUnlockPolicy(policyAddress);
 
-        uint256 buyerCapPct = vm.envOr("BUYER_CAP_PCT", uint256(5));
-        emissionsV2.setMaxBuyerSharePct(buyerCapPct);
-        console.log("Buyer cap pct:        ", buyerCapPct);
+        console.log("Buyer cap pct:        ", emissionsV2.MAX_BUYER_SHARE_PCT());
 
         // Optional explicit registry writes for uniform operational checks.
         ISetRegistry(address(emissionsV2)).setRegistry(registryAddress);
