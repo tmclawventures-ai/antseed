@@ -89,13 +89,13 @@ function summarizeToolItems(items: ToolRenderItem[]): string {
     `${n} ${n === 1 ? singular : plural}`;
 
   const parts: string[] = [];
-  if (counts.edit > 0)   parts.push(`edited ${phrase(counts.edit,   'file',    'files')}`);
-  if (counts.write > 0)  parts.push(`wrote ${phrase(counts.write,   'file',    'files')}`);
-  if (counts.read > 0)   parts.push(`read ${phrase(counts.read,     'file',    'files')}`);
-  if (counts.search > 0) parts.push(`ran ${phrase(counts.search,    'search',  'searches')}`);
-  if (counts.bash > 0)   parts.push(`executed ${phrase(counts.bash, 'command', 'commands')}`);
-  if (counts.browse > 0) parts.push(`opened ${phrase(counts.browse, 'page',    'pages')}`);
-  if (counts.other > 0)  parts.push(`used ${phrase(counts.other,    'tool',    'tools')}`);
+  if (counts.edit > 0)   parts.push(`Edited ${phrase(counts.edit,   'file',    'files')}`);
+  if (counts.write > 0)  parts.push(`Wrote ${phrase(counts.write,   'file',    'files')}`);
+  if (counts.read > 0)   parts.push(`Read ${phrase(counts.read,     'file',    'files')}`);
+  if (counts.search > 0) parts.push(`Ran ${phrase(counts.search,    'search',  'searches')}`);
+  if (counts.bash > 0)   parts.push(`Executed ${phrase(counts.bash, 'command', 'commands')}`);
+  if (counts.browse > 0) parts.push(`Opened ${phrase(counts.browse, 'page',    'pages')}`);
+  if (counts.other > 0)  parts.push(`Used ${phrase(counts.other,    'tool',    'tools')}`);
 
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0];
