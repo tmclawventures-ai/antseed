@@ -958,7 +958,6 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                 title="Search messages (⌘/Ctrl+F)"
               >
                 <HugeiconsIcon icon={Search01Icon} size={15} strokeWidth={1.8} />
-                <span>Search</span>
               </button>
             )}
             <ChatSessionStats
