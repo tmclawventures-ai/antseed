@@ -8,7 +8,6 @@ import { useMemo } from 'react';
 
 import {
   useDiemPrice,
-  usePoolAgeDays,
   usePoolStats,
 } from './lib/hooks';
 import {
@@ -22,28 +21,21 @@ import {
   Nav,
 } from './components/Layout';
 import { StakeCard } from './components/StakeCard';
-import { fmtNum, toDiemNumber, toUsdcNumber } from './lib/format';
+import { fmtNum, toDiemNumber } from './lib/format';
 import { DAYS_PER_YEAR } from './lib/epoch';
 import { DIEM_STAKING_PROXY, isAddressSet } from './lib/addresses';
-import { ALPHA_MAX_TOTAL_STAKE_DIEM_BASE } from './lib/protocol';
+import { ALPHA_MAX_TOTAL_STAKE_DIEM_BASE, MAX_USDC_PER_DIEM_PER_DAY } from './lib/protocol';
 
 export function App() {
   const diemPrice = useDiemPrice();
   const pool = usePoolStats();
-  const { poolAgeDays } = usePoolAgeDays();
 
-  // APY = (all-time USDC inflow / days pool has existed × 365) / pool TVL.
-  // Pool TVL is live staked DIEM valued at the current DIEM price.
+  // Max displayed rate = fixed 0.5 USDC per DIEM per day, annualized,
+  // divided by the live DIEM price.
   const apy = useMemo(() => {
     if (diemPrice == null || diemPrice <= 0) return 0;
-    if (pool.totalUsdcDistributedEver == null || pool.totalStaked == null || poolAgeDays == null) return 0;
-    const tvlDiem = toDiemNumber(pool.totalStaked);
-    if (tvlDiem <= 0 || poolAgeDays <= 0) return 0;
-    const annualizedUsdc = (toUsdcNumber(pool.totalUsdcDistributedEver) / poolAgeDays) * DAYS_PER_YEAR;
-    const poolValueUsd = tvlDiem * diemPrice;
-    if (poolValueUsd <= 0) return 0;
-    return (annualizedUsdc / poolValueUsd) * 100;
-  }, [diemPrice, pool.totalStaked, pool.totalUsdcDistributedEver, poolAgeDays]);
+    return ((MAX_USDC_PER_DIEM_PER_DAY * DAYS_PER_YEAR) / diemPrice) * 100;
+  }, [diemPrice]);
 
   // Prefer the live on-chain value. Fall back to the expected alpha cap
   // (100 DIEM) when the read hasn't returned yet or the proxy isn't deployed,
@@ -63,7 +55,7 @@ export function App() {
       <Nav />
       <main>
         <Hero diemPrice={diemPrice} apy={apy} />
-        <StakeCard diemPrice={diemPrice} poolAgeDays={poolAgeDays} apy={apy} />
+        <StakeCard diemPrice={diemPrice} apy={apy} />
         <ClaimBanner />
         <HowItWorks />
         <DualCards />

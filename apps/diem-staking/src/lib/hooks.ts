@@ -14,6 +14,60 @@ import { computeEpochClock, type EpochClock } from './epoch';
 const POOL_GENESIS_UNIX = 1_777_320_559;
 
 const POLL_MS = 12_000; // a bit above Base's 2s block time × a few blocks
+const DEXSCREENER_TOKEN_URL = `https://api.dexscreener.com/latest/dex/tokens/${DIEM_TOKEN}`;
+
+async function fetchDiemPriceFromCoinGecko(): Promise<number | null> {
+  try {
+    const r = await fetch(
+      `https://api.coingecko.com/api/v3/simple/token_price/base?contract_addresses=${DIEM_TOKEN}&vs_currencies=usd`,
+    );
+    const data = (await r.json()) as Record<string, { usd?: number }> | null;
+    const p = data?.[DIEM_TOKEN.toLowerCase()]?.usd;
+    if (typeof p === 'number' && p > 0) return p;
+  } catch {
+  }
+
+  try {
+    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=diem&vs_currencies=usd');
+    const data = (await r.json()) as { diem?: { usd?: number } } | null;
+    const p = data?.diem?.usd;
+    if (typeof p === 'number' && p > 0) return p;
+  } catch {
+  }
+
+  return null;
+}
+
+async function fetchDiemPriceFromDexScreener(): Promise<number | null> {
+  try {
+    const r = await fetch(DEXSCREENER_TOKEN_URL);
+    const data = (await r.json()) as {
+      pairs?: Array<{
+        chainId?: string;
+        priceUsd?: string;
+        liquidity?: { usd?: number };
+        baseToken?: { address?: string };
+        quoteToken?: { address?: string };
+      }>;
+    } | null;
+
+    const token = DIEM_TOKEN.toLowerCase();
+    const pairs = (data?.pairs ?? [])
+      .filter((pair) => pair.chainId === 'base')
+      // DexScreener's `priceUsd` is the USD price of the pair's base token.
+      // Only use pairs where DIEM is the base token; otherwise we'd read the
+      // other token's price when DIEM is the quote token.
+      .filter((pair) => pair.baseToken?.address?.toLowerCase() === token)
+      .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+
+    for (const pair of pairs) {
+      const price = Number(pair.priceUsd);
+      if (Number.isFinite(price) && price > 0) return price;
+    }
+  } catch {
+  }
+  return null;
+}
 
 export function useProxyDeployed(): boolean {
   return isAddressSet(DIEM_STAKING_PROXY);
@@ -23,23 +77,10 @@ export function useProxyDeployed(): boolean {
 export function useDiemPrice(): number | null {
   const [price, setPrice] = useState<number | null>(null);
   useEffect(() => {
-    const ids = ['diem', 'venice-token', 'venice-ai', 'venice'];
     let cancelled = false;
     (async () => {
-      for (const id of ids) {
-        try {
-          const r = await fetch(
-            `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`,
-          );
-          const data = (await r.json()) as Record<string, { usd?: number }> | null;
-          const p = data?.[id]?.usd;
-          if (typeof p === 'number' && p > 0) {
-            if (!cancelled) setPrice(p);
-            return;
-          }
-        } catch {
-        }
-      }
+      const nextPrice = await fetchDiemPriceFromCoinGecko() ?? await fetchDiemPriceFromDexScreener();
+      if (!cancelled && nextPrice != null) setPrice(nextPrice);
     })();
     return () => {
       cancelled = true;

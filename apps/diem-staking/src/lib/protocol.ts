@@ -8,3 +8,8 @@
  * `setMaxTotalStake`; once the read returns, the UI uses the contract value.
  */
 export const ALPHA_MAX_TOTAL_STAKE_DIEM_BASE = 100n * 10n ** 18n;
+
+/**
+ * Maximum USDC allocation rate shown in the UI.
+ */
+export const MAX_USDC_PER_DIEM_PER_DAY = 0.5;

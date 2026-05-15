@@ -35,10 +35,11 @@ import {
   toUsdcNumber,
 } from '../lib/format';
 import { DAYS_PER_YEAR } from '../lib/epoch';
+import { MAX_USDC_PER_DIEM_PER_DAY } from '../lib/protocol';
 
 type Tab = 'stake' | 'unstake' | 'claim';
 
-const DEFAULT_STAKE_AMOUNT = parseEther('10');
+const DEFAULT_STAKE_AMOUNT = parseEther('1');
 const DIEM_TERMS_URL = 'https://diem.antseed.com/terms-of-service.html';
 
 function formatDiemInput(value: bigint): string {
@@ -48,13 +49,12 @@ function formatDiemInput(value: bigint): string {
 
 export interface StakeCardProps {
   diemPrice: number | null;
-  poolAgeDays: number | null;
   apy: number;
 }
 
-export function StakeCard({ diemPrice, poolAgeDays, apy }: StakeCardProps) {
+export function StakeCard({ diemPrice, apy }: StakeCardProps) {
   const [tab, setTab] = useState<Tab>('stake');
-  const [amt, setAmt] = useState('10');
+  const [amt, setAmt] = useState('1');
   const [amtEdited, setAmtEdited] = useState(false);
   const { isConnected } = useAccount();
   const { epoch, remainingSecs } = useEpochClock();
@@ -74,13 +74,7 @@ export function StakeCard({ diemPrice, poolAgeDays, apy }: StakeCardProps) {
     return maxStakeable;
   }, [isConnected, pool.maxTotalStake, pool.totalStaked, user.walletDiem]);
 
-  const stakeDefaultAmt = useMemo(() => {
-    if (!isConnected) return formatDiemInput(DEFAULT_STAKE_AMOUNT);
-    if (stakeMaxAmount == null) return '0';
-
-    const defaultAmount = stakeMaxAmount < DEFAULT_STAKE_AMOUNT ? stakeMaxAmount : DEFAULT_STAKE_AMOUNT;
-    return formatDiemInput(defaultAmount);
-  }, [isConnected, stakeMaxAmount]);
+  const stakeDefaultAmt = useMemo(() => formatDiemInput(DEFAULT_STAKE_AMOUNT), []);
 
   const setAmtFromUser = (next: string) => {
     setAmtEdited(true);
@@ -101,13 +95,9 @@ export function StakeCard({ diemPrice, poolAgeDays, apy }: StakeCardProps) {
 
   const diemValue = parseFloat(amt) || 0;
   const poolDiem = toDiemNumber(pool.totalStaked);
-  const usdcPerDiemPerDay =
-    poolDiem > 0 && poolAgeDays != null && poolAgeDays > 0 && pool.totalUsdcDistributedEver != null
-      ? toUsdcNumber(pool.totalUsdcDistributedEver) / poolAgeDays / poolDiem
-      : null;
-  const usdcPerWeek = usdcPerDiemPerDay != null ? diemValue * usdcPerDiemPerDay * 7 : null;
-  const usdcPerYear = usdcPerDiemPerDay != null ? diemValue * usdcPerDiemPerDay * DAYS_PER_YEAR : null;
-  const usdcPerMonth = usdcPerYear != null ? usdcPerYear / 12 : null;
+  const usdcPerWeek = diemValue * MAX_USDC_PER_DIEM_PER_DAY * 7;
+  const usdcPerYear = diemValue * MAX_USDC_PER_DIEM_PER_DAY * DAYS_PER_YEAR;
+  const usdcPerMonth = usdcPerYear / 12;
   const amtUsd = diemPrice != null ? diemValue * diemPrice : null;
 
   const quickSet = (v: string) => {
@@ -200,7 +190,6 @@ export function StakeCard({ diemPrice, poolAgeDays, apy }: StakeCardProps) {
       <Metrics
         apy={apy}
         pool={pool}
-        poolAgeDays={poolAgeDays}
       />
 
       <FlowDiagram />
@@ -291,8 +280,8 @@ function StakePanel(props: StakePanelProps) {
 
       <div className="stake-reward-summary">
         <div className="reward-summary-head">
-          <span>Historical estimate</span>
-          <strong>Based on past activity</strong>
+          <span>Maximum estimate</span>
+          <strong>Max {MAX_USDC_PER_DIEM_PER_DAY} USDC / DIEM / day</strong>
         </div>
         <div className="reward-summary-grid">
           <div className="reward-summary-card primary">
@@ -308,7 +297,7 @@ function StakePanel(props: StakePanelProps) {
             <strong>{props.usdcPerYear != null ? fmtUSD(props.usdcPerYear) : '—'}</strong>
           </div>
           <div className="reward-summary-card accent">
-            <span>Historical rate</span>
+            <span>Max rate</span>
             <strong>{fmtPct(props.apy)}</strong>
           </div>
         </div>
@@ -320,8 +309,7 @@ function StakePanel(props: StakePanelProps) {
 
       <div className="claim-note">
         DIEM participation is experimental. USDC allocations are not guaranteed and may be zero.
-        Participation involves smart-contract risk, operator risk, token volatility, liquidity risk,
-        regulatory risk, and tax risk. By continuing, you agree to the{' '}
+        Participation involves smart-contract risk, operator risk, token volatility and liquidity risk. By continuing, you agree to the{' '}
         <a href={DIEM_TERMS_URL} target="_blank" rel="noopener noreferrer">DIEM Provider Capacity Program Terms</a>.
       </div>
 
@@ -782,7 +770,6 @@ function QuickSet({
 function Metrics(props: {
   apy: number;
   pool: ReturnType<typeof usePoolStats>;
-  poolAgeDays: number | null;
 }) {
   return (
     <div className="metrics">
@@ -801,11 +788,9 @@ function Metrics(props: {
         <div className="delta">all time</div>
       </div>
       <div className="metric">
-        <div className="lbl">Historical rate</div>
+        <div className="lbl">Max rate</div>
         <div className="val" style={{ color: 'var(--brand-dark)' }}>{fmtPct(props.apy)}</div>
-        <div className="delta">
-          {props.poolAgeDays != null ? `Past activity · ${fmtNum(props.poolAgeDays, 1)}d` : 'Warming up'}
-        </div>
+        <div className="delta">{MAX_USDC_PER_DIEM_PER_DAY} USDC / DIEM / day</div>
       </div>
       <div className="metric">
         <div className="lbl">Active participants</div>

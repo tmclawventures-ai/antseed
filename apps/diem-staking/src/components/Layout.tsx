@@ -1,6 +1,6 @@
 // Static layout sections: Nav, Hero, AlphaStrip, ClaimBanner, HowItWorks, FAQ,
 // DualCards, Footer. These don't depend on on-chain state (ClaimBanner and
-// Hero take a couple of computed values as props so they can show live APY /
+// Hero take a couple of computed values as props so they can show the max rate /
 // pool TVL). Every AntStation download link flows through `useAntstationDownload`
 // so Mac + Windows visitors get a direct installer href — same behaviour as
 // antseed.com.
@@ -112,7 +112,7 @@ export function Hero({ diemPrice, apy }: { diemPrice: number | null; apy: number
       <div className="hero-meta">
         <span className="live-badge">$DIEM ${fmtPrice(diemPrice)}</span>
         <span className="dot" />
-        <span><strong>{fmtPct(apy)}</strong> <span className="apr-sub">historical USDC activity · all-time avg</span></span>
+        <span><strong>{fmtPct(apy)}</strong> <span className="apr-sub">max USDC allocation rate</span></span>
         <span className="dot" />
         <span><strong>$ANTS</strong> incentives may be available</span>
         <span className="dot" />
@@ -315,12 +315,11 @@ export function FAQ() {
           </div>
         </details>
         <details className="faq">
-          <summary>How is the historical activity rate calculated?</summary>
+          <summary>How is the maximum rate calculated?</summary>
           <div className="body">
-            The displayed rate is backward-looking and informational only. It takes all USDC
-            that has flowed into the Program so far, divides by the number of days the Program
-            has existed, annualizes that daily average (× 365), then divides by live Program TVL.
-            It is not a forecast, target, promise, APY, or guaranteed return. Future USDC
+            The displayed rate is based on a fixed maximum of 0.5 USDC per DIEM per day,
+            annualized (× 365), then divided by the live DIEM price. It is informational only
+            and is not a forecast, target, promise, APY, or guaranteed return. Future USDC
             allocations may be lower or zero.
           </div>
         </details>
