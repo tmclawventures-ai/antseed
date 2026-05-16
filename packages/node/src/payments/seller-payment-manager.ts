@@ -1132,6 +1132,7 @@ export class SellerPaymentManager {
     this._closeRetryCount.delete(channelId);
     this._closingChannels.delete(channelId);
     this._reserveMax.delete(channelId);
+    this._pendingTopUp.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
 
