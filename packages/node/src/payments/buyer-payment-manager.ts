@@ -28,9 +28,11 @@ import { estimateCostFromBytes, computeCostUsdc, type ServicePricing } from './p
 
 /** Default tolerance: accept seller claims up to 1.4x buyer's estimate. */
 const DEFAULT_COST_TOLERANCE = 1.4;
-/** Fraction of reserve ceiling at which to signal a top-up is needed. */
-/** Must match or exceed contract's TOP_UP_SETTLED_THRESHOLD_BPS (85%). */
-const DEFAULT_TOPUP_THRESHOLD = 0.85;
+/** Fraction of reserve ceiling at which to signal a top-up is needed.
+ *  Trigger well before the contract's TOP_UP_SETTLED_THRESHOLD_BPS (85%)
+ *  so that by the time the seller calls topUp() on-chain, enough has been
+ *  settled to pass the threshold check. */
+const DEFAULT_TOPUP_THRESHOLD = 0.65;
 
 export interface BuyerPaymentConfig {
   rpcUrl: string;
@@ -297,13 +299,20 @@ export class BuyerPaymentManager {
       ? targetCumulative
       : minAdvance;
 
-    if (requestedAmount > maxSignable && maxSignable >= ceiling) {
-      await this.topUpReserve(sellerPeerId, paymentMux);
-      maxSignable = this._maxSignable(sellerPeerId);
-    }
+    const extendNeedsTopUp = requestedAmount > maxSignable && maxSignable >= ceiling;
 
+    // Cap at current ceiling — if topUp is needed we send the SpendingAuth first
+    // so the seller has a high-enough settle amount for the on-chain topUp threshold.
     const nextCumulative = requestedAmount < maxSignable ? requestedAmount : maxSignable;
     if (nextCumulative <= currentCumulative) {
+      // Nothing to sign at current ceiling — try topUp anyway for next round
+      if (extendNeedsTopUp) {
+        try {
+          await this.topUpReserve(sellerPeerId, paymentMux);
+        } catch (err) {
+          debugWarn(`[BuyerPayment] extendCurrentSpendingAuth: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
+        }
+      }
       debugWarn(
         `[BuyerPayment] Cannot extend active session for ${sellerPeerId.slice(0, 12)}... ` +
         `(current=${currentCumulative} maxSignable=${maxSignable} target=${targetCumulative ?? 'n/a'})`,
@@ -336,6 +345,16 @@ export class BuyerPaymentManager {
       metadata: encodedMetadata,
       spendingAuthSig,
     });
+
+    // Send topUp AFTER the SpendingAuth so the seller processes the higher
+    // cumulative first, meeting the on-chain settle threshold for topUp.
+    if (extendNeedsTopUp) {
+      try {
+        await this.topUpReserve(sellerPeerId, paymentMux);
+      } catch (err) {
+        debugWarn(`[BuyerPayment] extendCurrentSpendingAuth: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
 
     return session.sessionId;
   }
@@ -855,22 +874,36 @@ export class BuyerPaymentManager {
     // This prevents a malicious seller from claiming a small cost but requesting the full reserve.
     let maxSignable = this._maxSignable(sellerPeerId);
     const ceiling = this._getCeiling(sellerPeerId);
-    if (requiredCumulativeAmount > maxSignable && maxSignable >= ceiling) {
-      try {
-        await this.topUpReserve(sellerPeerId, paymentMux);
-      } catch (err) {
-        debugWarn(`[BuyerPayment] NeedAuth: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
-      }
-      maxSignable = this._maxSignable(sellerPeerId);
-    }
-    if (maxSignable <= currentCumulative) {
+    const needsTopUp = requiredCumulativeAmount > maxSignable && maxSignable >= ceiling;
+    if (maxSignable <= currentCumulative && !needsTopUp) {
       debugWarn(
         `[BuyerPayment] NeedAuth: maxSignable=${maxSignable} <= currentCumulative=${currentCumulative} — overdraft limit reached`,
       );
       return;
     }
 
-    const effectiveAmount = requiredCumulativeAmount < maxSignable ? requiredCumulativeAmount : maxSignable;
+    // When a topUp is needed, first sign at the current ceiling so the seller
+    // has a high-enough settled amount to pass the on-chain TopUpThresholdNotMet
+    // check (contract requires 85% of deposit to be settleable before topUp).
+    // We cap at the old ceiling here; the topUp is sent AFTER so the seller
+    // processes the SpendingAuth first, then the topUp with adequate settle amount.
+    const effectiveAmount = needsTopUp
+      ? (maxSignable > currentCumulative ? maxSignable : currentCumulative)
+      : (requiredCumulativeAmount < maxSignable ? requiredCumulativeAmount : maxSignable);
+    if (effectiveAmount <= currentCumulative) {
+      // Nothing to sign — trigger topUp anyway to extend ceiling for next round
+      if (needsTopUp) {
+        try {
+          await this.topUpReserve(sellerPeerId, paymentMux);
+        } catch (err) {
+          debugWarn(`[BuyerPayment] NeedAuth: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      debugWarn(
+        `[BuyerPayment] NeedAuth: effectiveAmount=${effectiveAmount} <= currentCumulative=${currentCumulative} — cannot advance`,
+      );
+      return;
+    }
 
     debugLog(`[BuyerPayment] NeedAuth: channel=${session.sessionId.slice(0, 18)}... required=${requiredCumulativeAmount} effective=${effectiveAmount}`);
 
@@ -919,6 +952,18 @@ export class BuyerPaymentManager {
       debugLog(`[BuyerPayment] NeedAuth responded: new cumulativeAmount=${effectiveAmount}`);
     } catch {
       debugLog(`[BuyerPayment] NeedAuth: connection closed before SpendingAuth could be sent`);
+    }
+
+    // Send topUp AFTER the SpendingAuth so the seller processes the higher
+    // cumulative first — this ensures the on-chain settle amount meets the
+    // contract's TopUpThresholdNotMet requirement (85% of deposit must be
+    // settleable before topUp is allowed).
+    if (needsTopUp) {
+      try {
+        await this.topUpReserve(sellerPeerId, paymentMux);
+      } catch (err) {
+        debugWarn(`[BuyerPayment] NeedAuth: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
+      }
     }
   }
 

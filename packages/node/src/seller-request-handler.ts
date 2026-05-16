@@ -174,7 +174,10 @@ export class SellerRequestHandler {
           }
           let accepted = spm.getAcceptedCumulative(session.sessionId);
           const spent = spm.getCumulativeSpend(session.sessionId);
-          const reserveMax = spm.getReserveMax(session.sessionId);
+          // Use the effective ceiling (includes pending topUp that hasn't
+          // confirmed on-chain yet) so we don't prematurely declare the
+          // channel exhausted while a topUp is in progress.
+          const reserveMax = spm.getEffectiveReserveMax(session.sessionId);
           // If spend has caught up and there is no headroom left in the reserve,
           // stop serving before accepting any additional request cost.
           const isAtExactSpendLimit = spent > 0n && spent === accepted && reserveMax > 0n && accepted >= reserveMax;
