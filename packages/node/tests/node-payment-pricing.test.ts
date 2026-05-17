@@ -44,6 +44,7 @@ function makeSpmMock(overrides: Record<string, unknown> = {}): any {
     getEffectiveReserveMax() {
       return this.getReserveMax();
     },
+    isChannelBlocked: () => false,
     getPaymentRequirements: () => ({ minBudgetPerRequest: '10000', suggestedAmount: '1000000' }),
     waitForPendingAuths: async () => {},
     awaitAcceptedAtLeast: async () => false,
@@ -467,7 +468,43 @@ describe('SellerRequestHandler payment pricing selection', () => {
     expect(body).toMatchObject({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '1000001', reserveMaxAmount: '1000000' });
   });
 
-  it('continues serving when spend reached the on-chain ceiling but a higher topUp is pending', async () => {
+  it('does not route a blocked channel after permanent top-up failure', async () => {
+    const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
+
+    const sendPaymentRequired = vi.fn();
+    const settleSession = vi.fn(async () => {});
+    const handler = new SellerRequestHandler({
+      providers: [provider],
+      sellerPaymentManager: makeSpmMock({
+        getCumulativeSpend: () => 900_000n,
+        getAcceptedCumulative: () => 900_000n,
+        getReserveMax: () => 1_000_000n,
+        getEffectiveReserveMax: () => 1_000_000n,
+        isChannelBlocked: () => true,
+        settleSession,
+      }),
+      sessionTracker: null,
+      channelsClient: {} as any,
+      announcer: null,
+      emit: () => false,
+    });
+
+    const sentFrames: Uint8Array[] = [];
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
+    const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
+
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-blocked-topup', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
+
+    expect(provider.handleRequest).not.toHaveBeenCalled();
+    expect(sendPaymentRequired).toHaveBeenCalledWith(expect.objectContaining({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '900000', reserveMaxAmount: '1000000' }));
+    expect(settleSession).toHaveBeenCalledOnce();
+    const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
+    expect(response.statusCode).toBe(402);
+  });
+
+  it('stops serving when spend reached the on-chain ceiling even if a higher topUp is pending', async () => {
     const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
     provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
@@ -479,7 +516,6 @@ describe('SellerRequestHandler payment pricing selection', () => {
         getCumulativeSpend: () => 1_000_000n,
         getAcceptedCumulative: () => 1_000_000n,
         getReserveMax: () => 1_000_000n,
-        getEffectiveReserveMax: () => 2_000_000n,
       }),
       sessionTracker: null,
       channelsClient: {} as any,
@@ -494,10 +530,10 @@ describe('SellerRequestHandler payment pricing selection', () => {
 
     await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-pending-topup', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
-    expect(provider.handleRequest).toHaveBeenCalledOnce();
-    expect(sendPaymentRequired).not.toHaveBeenCalled();
-    expect(sendNeedAuth).toHaveBeenCalledOnce();
+    expect(provider.handleRequest).not.toHaveBeenCalled();
+    expect(sendPaymentRequired).toHaveBeenCalledWith(expect.objectContaining({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, reserveMaxAmount: '1000000' }));
+    expect(sendNeedAuth).not.toHaveBeenCalled();
     const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(402);
   });
 });

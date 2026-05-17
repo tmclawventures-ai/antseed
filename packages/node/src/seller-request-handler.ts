@@ -176,10 +176,12 @@ export class SellerRequestHandler {
           }
           let accepted = spm.getAcceptedCumulative(session.sessionId);
           const spent = spm.getCumulativeSpend(session.sessionId);
-          // Use the effective ceiling (includes pending topUp that hasn't
-          // confirmed on-chain yet) so we don't prematurely declare the
-          // channel exhausted while a topUp is in progress.
+          // Serving headroom only includes funds locked on-chain. Pending
+          // top-ups are not counted until topUp() succeeds, otherwise a large
+          // request could push spend above the current reserve before the extra
+          // funds are actually locked.
           const reserveMax = spm.getEffectiveReserveMax(session.sessionId);
+          const isBlocked = spm.isChannelBlocked(session.sessionId);
           // If spend has caught up and there is no headroom left in the reserve,
           // stop serving before accepting any additional request cost.
           const isAtExactSpendLimit = spent > 0n && spent === accepted && reserveMax > 0n && accepted >= reserveMax;
@@ -200,7 +202,7 @@ export class SellerRequestHandler {
               debugLog(`[SellerHandler] Caught up before 402 for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted})`);
             }
           }
-          if (spent > 0n && (spent > accepted || isAtExactSpendLimit)) {
+          if (isBlocked || (spent > 0n && (spent > accepted || isAtExactSpendLimit))) {
             const providerPricing = this.resolveProviderPricing(provider, request);
             const baseRequirements = spm.getPaymentRequirements(
               request.requestId, buyerPeerId, providerPricing,
@@ -210,7 +212,7 @@ export class SellerRequestHandler {
             // on-chain, so requiring more than `spent` would authorize payment
             // for work the seller has not delivered.
             const target = spent;
-            const isFullyExhausted = reserveMax > 0n && (accepted >= reserveMax || target > reserveMax);
+            const isFullyExhausted = isBlocked || (reserveMax > 0n && (accepted >= reserveMax || target > reserveMax));
             const requirements = {
               ...baseRequirements,
               requiredCumulativeAmount: target.toString(),
@@ -221,7 +223,8 @@ export class SellerRequestHandler {
               ...(isFullyExhausted ? { code: PAYMENT_CODE_CHANNEL_EXHAUSTED } : {}),
             };
             if (isFullyExhausted) {
-              debugLog(`[SellerHandler] Session fully exhausted for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax}) — closing and returning 402`);
+              const reason = isBlocked ? 'blocked' : 'fully exhausted';
+              debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax}) — closing and returning 402`);
               // Default settleSession() performs final close(); do not use
               // settleOnly here because exhausted channels must release the
               // buyer's unused reserve before the buyer opens a replacement.
