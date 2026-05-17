@@ -35,6 +35,26 @@ Until a peer is pinned, every request returns `no_peer_pinned` — there is no a
 
 `antseed buyer start` does not require a pre-existing `~/.antseed/config.json`. If the file is missing, the CLI starts with built-in defaults such as router `local` and proxy port `8377`.
 
+## Buyer state isolation
+
+Buyer runtime state is stored in the CLI data directory. By default this is `~/.antseed`, where the proxy writes `buyer.state.json`, SQLite databases, payment-channel files, and the fallback `identity.key`.
+
+For multiple buyer nodes, service integrations, isolated tests, or concurrent processes, give each buyer its own data directory:
+
+```bash
+export BUYDIR="$HOME/.antseed-buyer-myapp"
+mkdir -p "$BUYDIR"
+
+ANTSEED_DATA_DIR="$BUYDIR" \
+antseed --data-dir "$BUYDIR" buyer start \
+  --peer <peer-id> \
+  --port 8380
+```
+
+Use `--data-dir <path>` in service/systemd scripts because it is explicit. `ANTSEED_DATA_DIR=<path>` is useful for wrappers and local scripts. Do not reuse the same buyer data directory across concurrent processes.
+
+If the buyer proxy starts but appears to use stale pins, waits on broad discovery, times out before payment negotiation, or shows sessions/channels in an unexpected place, check the startup log for the resolved data directory and `buyer.state.json` path. `ANTSEED_HOME` is not the CLI state-isolation setting; use `--data-dir` or `ANTSEED_DATA_DIR`.
+
 Extra buyer config is optional. Add it only for advanced customization such as pricing caps, reputation thresholds, bootstrap nodes, or chain settings:
 
 ```json

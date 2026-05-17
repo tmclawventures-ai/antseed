@@ -97,10 +97,18 @@ Foreground, for a laptop or a quick test:
 antseed buyer start
 ```
 
+For an isolated Hermes buyer, use a dedicated data directory. This is where AntSeed writes `buyer.state.json`, SQLite databases, payment-channel state, and the fallback `identity.key`:
+
+```bash
+export BUYDIR="$HOME/.antseed-buyer-hermes"
+mkdir -p "$BUYDIR"
+ANTSEED_DATA_DIR="$BUYDIR" antseed --data-dir "$BUYDIR" buyer start
+```
+
 Advanced: if Hermes must use a non-default proxy port:
 
 ```bash
-antseed buyer start --port 5005
+antseed --data-dir "$BUYDIR" buyer start --port 5005
 ```
 
 Persistent (Linux, systemd):
@@ -116,7 +124,8 @@ Wants=network-online.target
 Type=simple
 User=$USER
 Environment=ANTSEED_IDENTITY_HEX=<64-hex-no-0x>
-ExecStart=/usr/bin/env antseed buyer start
+Environment=ANTSEED_DATA_DIR=%h/.antseed-buyer-hermes
+ExecStart=/usr/bin/env antseed --data-dir %h/.antseed-buyer-hermes buyer start
 Restart=on-failure
 RestartSec=10
 

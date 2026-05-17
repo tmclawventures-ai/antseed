@@ -63,6 +63,30 @@ antseed seller start
 
 `config.json` is the durable source of truth. Env vars are for secrets and one-off overrides.
 
+### Buyer state isolation
+
+Buyer runtime state lives in the data directory, not just in the config file. By default that directory is `~/.antseed`, which contains `buyer.state.json`, SQLite databases, payment-channel state, and the fallback `identity.key`.
+
+Use a separate data directory for each independent buyer node, service integration, test run, or concurrent process:
+
+```bash
+export BUYDIR="$HOME/.antseed-buyer-myapp"
+mkdir -p "$BUYDIR"
+
+ANTSEED_DATA_DIR="$BUYDIR" \
+antseed --data-dir "$BUYDIR" buyer start \
+  --peer <peer-id> \
+  --port 8380
+```
+
+Notes:
+
+- `--data-dir <path>` is the most explicit option and is recommended in service managers such as systemd.
+- `ANTSEED_DATA_DIR=<path>` is the environment-variable equivalent for scripts and wrappers.
+- Do not reuse the same buyer data directory across concurrent buyer processes.
+- If behavior looks stale or unexpected, confirm which `buyer.state.json` and SQLite files the process logged at startup.
+- `ANTSEED_HOME` is not the buyer state-isolation knob for the CLI; use `--data-dir` or `ANTSEED_DATA_DIR`.
+
 ## Plugins
 
 Antseed uses an open plugin ecosystem. Provider and router plugins are installed into `~/.antseed/plugins/` via npm.
