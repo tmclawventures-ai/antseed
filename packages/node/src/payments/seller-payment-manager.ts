@@ -574,9 +574,10 @@ export class SellerPaymentManager {
 
           debugWarn(
             `[SellerPayment] Top-up on-chain failed permanently: channel=${channelId.slice(0, 18)}... ` +
-            `kind=${failureKind} error=${this._formatError(topUpErr)} — rejecting topUp`,
+            `kind=${failureKind} error=${this._formatError(topUpErr)} — settling latest auth and rejecting topUp`,
           );
           this._pendingTopUp.delete(channelId);
+          await this._settleLatestAuth(channelId, 'permanent topUp failure', { respectMinSettleDelta: false });
           return 'rejected';
         }
         return 'accepted';
@@ -748,6 +749,65 @@ export class SellerPaymentManager {
     return parts.filter(Boolean).join(' ');
   }
 
+  private async _settleLatestAuth(
+    channelId: string,
+    reason: string,
+    { respectMinSettleDelta = true }: { respectMinSettleDelta?: boolean } = {},
+  ): Promise<void> {
+    const { amount, metadata, sig } = this._getSettleParams(channelId);
+    if (amount <= 0n || sig === '0x') {
+      debugLog(`[SellerPayment] Skipping settle after ${reason}: channel=${channelId.slice(0, 18)}... no signed spend`);
+      return;
+    }
+
+    let delta: bigint | null = null;
+    if (respectMinSettleDelta) {
+      // Skip the getSession RPC entirely when our local cumulative hasn't
+      // moved since we last settled this channel — the contract would revert
+      // with InvalidAmount (strict `>` check) and we'd waste an RPC round-trip.
+      const lastSettled = this._lastSettledCumulative.get(channelId);
+      if (lastSettled !== undefined && amount <= lastSettled) {
+        debugLog(`[SellerPayment] Skip settle ${channelId.slice(0, 18)}... — cumulative unchanged since last settle (${amount})`);
+        return;
+      }
+
+      // Cache miss (e.g. after restart) or local cumulative has advanced —
+      // confirm against on-chain state in case another process settled.
+      let onChainSettled: bigint;
+      try {
+        const onChain = await this._channelsClient.getSession(channelId);
+        onChainSettled = onChain.settled;
+      } catch (err) {
+        debugWarn(`[SellerPayment] getSession failed for ${channelId.slice(0, 18)}...: ${err instanceof Error ? err.message : err} — attempting settle anyway`);
+        onChainSettled = 0n;
+      }
+      delta = amount - onChainSettled;
+      if (delta <= 0n) {
+        // Resync the cache so we stop hitting the RPC on every idle tick.
+        this._lastSettledCumulative.set(channelId, onChainSettled);
+        debugLog(`[SellerPayment] Skip settle ${channelId.slice(0, 18)}... — already settled on-chain (local=${amount}, onChain=${onChainSettled})`);
+        return;
+      }
+      if (delta < this._minSettleDelta) {
+        // Mark this cumulative as a no-op so the next tick short-circuits
+        // without re-querying getSession until amount actually advances.
+        this._lastSettledCumulative.set(channelId, amount);
+        debugLog(`[SellerPayment] Skip settle ${channelId.slice(0, 18)}... — delta=${delta} below minSettleDelta=${this._minSettleDelta}`);
+        return;
+      }
+    }
+
+    const deltaText = delta === null ? '' : ` delta=${delta}`;
+    debugLog(`[SellerPayment] Settling channel ${channelId.slice(0, 18)}... cumulative=${amount}${deltaText} (${reason})`);
+    try {
+      await this._channelsClient.settle(this._signer, channelId, amount, metadata, sig);
+      this._lastSettledCumulative.set(channelId, amount);
+      debugLog(`[SellerPayment] Settled channel ${channelId.slice(0, 18)}... — channel remains open`);
+    } catch (err) {
+      debugWarn(`[SellerPayment] Failed to settle channel after ${reason}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   private async _retryPendingTopUp(
     channelId: string,
     pendingTopUp: { newMaxAmount: bigint; deadline: number; reserveAuthSig: string },
@@ -791,8 +851,9 @@ export class SellerPaymentManager {
 
       debugWarn(
         `[SellerPayment] Deferred topUp failed permanently: channel=${channelId.slice(0, 18)}... ` +
-        `kind=${failureKind} error=${this._formatError(retryErr)} — dropping pending topUp`,
+        `kind=${failureKind} error=${this._formatError(retryErr)} — settling latest auth and dropping pending topUp`,
       );
+      await this._settleLatestAuth(channelId, 'permanent deferred topUp failure', { respectMinSettleDelta: false });
       return 'permanent-failure';
     }
   }
@@ -1035,50 +1096,7 @@ export class SellerPaymentManager {
       if (settleOnly) return;
       debugLog(`[SellerPayment] Zero-cumulative channel ${channelId.slice(0, 18)}... — deferring to timeout checker`);
     } else if (settleOnly) {
-      if (amount === 0n) return;
-
-      // Skip the getSession RPC entirely when our local cumulative hasn't
-      // moved since we last settled this channel — the contract would revert
-      // with InvalidAmount (strict `>` check) and we'd waste an RPC round-trip.
-      const lastSettled = this._lastSettledCumulative.get(channelId);
-      if (lastSettled !== undefined && amount <= lastSettled) {
-        debugLog(`[SellerPayment] Skip settle ${channelId.slice(0, 18)}... — cumulative unchanged since last settle (${amount})`);
-        return;
-      }
-
-      // Cache miss (e.g. after restart) or local cumulative has advanced —
-      // confirm against on-chain state in case another process settled.
-      let onChainSettled: bigint;
-      try {
-        const onChain = await this._channelsClient.getSession(channelId);
-        onChainSettled = onChain.settled;
-      } catch (err) {
-        debugWarn(`[SellerPayment] getSession failed for ${channelId.slice(0, 18)}...: ${err instanceof Error ? err.message : err} — attempting settle anyway`);
-        onChainSettled = 0n;
-      }
-      const delta = amount - onChainSettled;
-      if (delta <= 0n) {
-        // Resync the cache so we stop hitting the RPC on every idle tick.
-        this._lastSettledCumulative.set(channelId, onChainSettled);
-        debugLog(`[SellerPayment] Skip settle ${channelId.slice(0, 18)}... — already settled on-chain (local=${amount}, onChain=${onChainSettled})`);
-        return;
-      }
-      if (delta < this._minSettleDelta) {
-        // Mark this cumulative as a no-op so the next tick short-circuits
-        // without re-querying getSession until amount actually advances.
-        this._lastSettledCumulative.set(channelId, amount);
-        debugLog(`[SellerPayment] Skip settle ${channelId.slice(0, 18)}... — delta=${delta} below minSettleDelta=${this._minSettleDelta}`);
-        return;
-      }
-
-      debugLog(`[SellerPayment] Settling channel ${channelId.slice(0, 18)}... cumulative=${amount} delta=${delta} (keeping open)`);
-      try {
-        await this._channelsClient.settle(this._signer, channelId, amount, metadata, sig);
-        this._lastSettledCumulative.set(channelId, amount);
-        debugLog(`[SellerPayment] Settled channel ${channelId.slice(0, 18)}... — channel remains open`);
-      } catch (err) {
-        debugWarn(`[SellerPayment] Failed to settle channel: ${err instanceof Error ? err.message : err}`);
-      }
+      await this._settleLatestAuth(channelId, 'idle settle', { respectMinSettleDelta: true });
       return;
     } else {
       if (this._closingChannels.has(channelId)) {

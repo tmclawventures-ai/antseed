@@ -145,6 +145,7 @@ describe('SellerPaymentManager', () => {
     manager = new SellerPaymentManager(sellerIdentity, config, store);
 
     vi.spyOn(manager.channelsClient, 'reserve').mockResolvedValue('0xreserve-hash');
+    vi.spyOn(manager.channelsClient, 'settle').mockResolvedValue('0xsettle-hash');
     vi.spyOn(manager.channelsClient, 'close').mockResolvedValue('0xclose-hash');
     vi.spyOn(manager.channelsClient, 'requestClose').mockResolvedValue('0xrequesttimeout-hash');
     vi.spyOn(manager.channelsClient, 'withdraw').mockResolvedValue('0xwithdraw-hash');
@@ -317,6 +318,11 @@ describe('SellerPaymentManager', () => {
     });
 
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('rejected');
+    expect(manager.channelsClient.settle).toHaveBeenCalledOnce();
+    const settleArgs = (manager.channelsClient.settle as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(settleArgs[1]).toBe(channelId);
+    expect(settleArgs[2]).toBe(900_000n);
+    expect(settleArgs[4]).toBe(auth900k.spendingAuthSig);
     expect(manager.hasPendingTopUp(channelId)).toBe(false);
     expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
     expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
@@ -360,6 +366,11 @@ describe('SellerPaymentManager', () => {
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, overCeiling, mux)).toBe('rejected');
 
     expect(topUpSpy).toHaveBeenCalledTimes(2);
+    expect(manager.channelsClient.settle).toHaveBeenCalledOnce();
+    const settleArgs = (manager.channelsClient.settle as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(settleArgs[1]).toBe(channelId);
+    expect(settleArgs[2]).toBe(900_000n);
+    expect(settleArgs[4]).toBe(auth900k.spendingAuthSig);
     expect(manager.hasPendingTopUp(channelId)).toBe(false);
     expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
     expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
