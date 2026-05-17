@@ -74,8 +74,15 @@ export class SellerPaymentManager {
     /** On-chain seller address: proxy when behind a facade, wallet otherwise. */
     seller: string;
   }> | null = null;
-  /** In-memory cache of active buyer peerIds for fast has-session checks. */
+  /**
+   * In-memory cache of buyer peerIds with an active payment session. Hydrated
+   * sessions are included for existing hasSession() semantics; `_hydratedChannelIds`
+   * lets timeout cleanup distinguish restart-only zero-auth zombies.
+   */
   private readonly _activeBuyers = new Set<string>();
+
+  /** Channels restored from disk before the buyer has proven it reconnected. */
+  private readonly _hydratedChannelIds = new Set<string>();
   /** Per-buyer mutex to prevent concurrent handleSpendingAuth for the same buyer. */
   private readonly _buyerLocks = new Map<string, Promise<void>>();
 
@@ -155,6 +162,7 @@ export class SellerPaymentManager {
     const activeChannels = this._channelStore.getActiveChannels('seller');
     for (const channel of activeChannels) {
       this._activeBuyers.add(channel.peerId);
+      this._hydratedChannelIds.add(channel.sessionId);
       this._acceptedCumulative.set(channel.sessionId, BigInt(channel.authMax));
       this._spent.set(channel.sessionId, BigInt(channel.tokensDelivered));
       // Hydrate reserveMax from previousConsumption (repurposed field)
@@ -238,12 +246,44 @@ export class SellerPaymentManager {
     this._latestAuth.delete(channelId);
     this._closeRetryCount.delete(channelId);
     this._closingChannels.delete(channelId);
+    this._hydratedChannelIds.delete(channelId);
     this._reserveMax.delete(channelId);
     this._pendingTopUp.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
     this._activeBuyers.delete(peerId);
     debugLog(`[SellerPayment] Evicted stale channel ${channelId.slice(0, 18)}... — ${reason}`);
+  }
+
+  /**
+   * Restore a persisted SpendingAuth after in-memory cleanup. This prevents the
+   * timeout checker from mistaking an active channel with a durable signed auth
+   * for a zero-auth zombie and closing it at the already-settled amount.
+   */
+  private _restorePersistedSpendingAuth(channel: StoredChannel): bigint | null {
+    const persistedCumulative = BigInt(channel.authMax || '0');
+    if (persistedCumulative <= 0n || !channel.latestSpendingAuthSig) {
+      return null;
+    }
+
+    this._acceptedCumulative.set(channel.sessionId, persistedCumulative);
+    this._latestAuth.set(channel.sessionId, {
+      spendingAuthSig: channel.latestSpendingAuthSig,
+      cumulativeAmount: persistedCumulative,
+      metadataHash: '',
+      metadata: channel.latestMetadata ?? '',
+    });
+    this._spent.set(channel.sessionId, BigInt(channel.tokensDelivered || '0'));
+
+    const storedReserveMax = BigInt(channel.previousConsumption || '0');
+    if (storedReserveMax > 0n) {
+      this._reserveMax.set(channel.sessionId, storedReserveMax);
+    }
+
+    this._hydratedChannelIds.delete(channel.sessionId);
+    this._notifyAcceptedUpdate(channel.sessionId, persistedCumulative);
+    debugLog(`[SellerPayment] Restored persisted SpendingAuth for ${channel.sessionId.slice(0, 18)}... cumulative=${persistedCumulative}`);
+    return persistedCumulative;
   }
 
   /**
@@ -446,10 +486,10 @@ export class SellerPaymentManager {
           reserveMaxAmount,
           0n,
           {
-          spendingAuthSig: '',
-          cumulativeAmount: 0n,
-          metadataHash: payload.metadataHash,
-          metadata: payload.metadata,
+            spendingAuthSig: '',
+            cumulativeAmount: 0n,
+            metadataHash: payload.metadataHash,
+            metadata: payload.metadata,
           },
         );
 
@@ -497,6 +537,7 @@ export class SellerPaymentManager {
           );
 
           // Update tracking
+          this._hydratedChannelIds.delete(channelId);
           this._reserveMax.set(channelId, newMaxAmount);
           const session = this._channelStore.getChannel(channelId);
           if (session) {
@@ -578,6 +619,7 @@ export class SellerPaymentManager {
         }
 
         // Update tracking
+        this._hydratedChannelIds.delete(channelId);
         this._acceptedCumulative.set(channelId, cumulativeAmount);
         this._latestAuth.set(channelId, {
           spendingAuthSig: payload.spendingAuthSig,
@@ -731,6 +773,7 @@ export class SellerPaymentManager {
     latestAuth: LatestAuth,
   ): void {
     this._channelStore.upsertChannel(session);
+    this._hydratedChannelIds.delete(session.sessionId);
     this._acceptedCumulative.set(session.sessionId, cumulativeAmount);
     this._reserveMax.set(session.sessionId, reserveMaxAmount);
     this._spent.set(session.sessionId, spent);
@@ -789,6 +832,8 @@ export class SellerPaymentManager {
       debugWarn(`[SellerPayment] validateAndAcceptAuth: cumulative decreased from ${existingCumulative} to ${newCumulative}`);
       return false;
     }
+
+    this._hydratedChannelIds.delete(channelId);
 
     // Update if strictly greater
     if (newCumulative > existingCumulative) {
@@ -957,6 +1002,7 @@ export class SellerPaymentManager {
     this._closeRetryCount.delete(channelId);
     this._closingChannels.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
+    this._hydratedChannelIds.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
     this._activeBuyers.delete(buyerPeerId);
   }
@@ -990,10 +1036,12 @@ export class SellerPaymentManager {
 
   /**
    * Check for stale sessions and attempt to close them.
-   * The seller can only close() with a valid SpendingAuth — it cannot
-   * requestClose or withdraw (those are buyer-only on-chain).
-   * If the seller has no auths, the session remains open until the buyer
-   * calls requestClose → withdraw on-chain.
+   * - Channels with a buyer SpendingAuth go through `settleSession()`.
+   * - Zombie channels (buyer gone, no auth, deadline elapsed) can be closed
+   *   on-chain with `finalAmount == channel.settled`, which intentionally
+   *   skips SpendingAuth verification and lets the seller release the lock,
+   *   decrement activeChannelCount, and advance channel stats without buyer
+   *   cooperation.
    * Called periodically and on startup for recovery.
    */
   async checkTimeouts(): Promise<void> {
@@ -1001,7 +1049,10 @@ export class SellerPaymentManager {
     const activeChannels = this._channelStore.getActiveChannels('seller');
 
     for (const channel of activeChannels) {
-      const accepted = this._acceptedCumulative.get(channel.sessionId) ?? 0n;
+      let accepted = this._acceptedCumulative.get(channel.sessionId) ?? 0n;
+      if (accepted === 0n) {
+        accepted = this._restorePersistedSpendingAuth(channel) ?? accepted;
+      }
 
       try {
         // Validate on-chain state — evict if channel no longer exists
@@ -1013,20 +1064,66 @@ export class SellerPaymentManager {
           continue;
         }
 
+        const buyerDisconnected = !this._activeBuyers.has(channel.peerId);
+        const hydratedZeroAuthExpired = accepted === 0n
+          && this._hydratedChannelIds.has(channel.sessionId)
+          && nowSecs > channel.deadline;
+
         // If we have auths and the buyer is disconnected, try to close
-        if (accepted > 0n && !this._activeBuyers.has(channel.peerId)) {
+        if (accepted > 0n && buyerDisconnected) {
           debugLog(`[SellerPayment] Channel ${channel.sessionId.slice(0, 18)}... buyer disconnected — attempting close`);
           await this.settleSession(channel.peerId);
+          continue;
         }
-        // If no auths and buyer disconnected, nothing the seller can do on-chain.
-        // The buyer must call requestClose → withdraw. We just clean up locally
-        // after a reasonable period (e.g. deadline passed).
-        if (accepted === 0n && !this._activeBuyers.has(channel.peerId) && nowSecs > channel.deadline) {
-          this._evictStaleChannel(channel.sessionId, channel.peerId, 'no auths, past deadline', 'timeout');
+        // No auths, buyer gone, deadline elapsed: close with the current
+        // on-chain settled amount. The contract skips signature verification
+        // when finalAmount == settled, so this safely cleans up zombie
+        // channels without claiming any unproven spend.
+        if (accepted === 0n && (buyerDisconnected || hydratedZeroAuthExpired) && nowSecs > channel.deadline) {
+          if (onChainState.status !== 'active') {
+            // 'unknown' means the RPC returned partial data. Evict locally
+            // rather than risking a close() against an ambiguous channel.
+            this._evictStaleChannel(channel.sessionId, channel.peerId, 'no auths, past deadline, on-chain status unknown', 'timeout');
+            continue;
+          }
+          await this._closeWithoutAuth(channel.sessionId, channel.peerId, onChainState.channel.settled);
         }
       } catch (err) {
         debugWarn(`[SellerPayment] Failed to process channel ${channel.sessionId.slice(0, 18)}...: ${err instanceof Error ? err.message : err}`);
       }
+    }
+  }
+
+  /**
+   * Close a zombie channel (buyer gone, no signed auth) using the current
+   * on-chain settled cumulative as finalAmount. This intentionally settles no
+   * additional spend, but still marks the channel closed and releases the
+   * remaining reserved deposit back to the buyer.
+   */
+  private async _closeWithoutAuth(channelId: string, peerId: string, onChainSettled: bigint): Promise<void> {
+    if (this._closingChannels.has(channelId)) {
+      debugLog(`[SellerPayment] Close already in flight for ${channelId.slice(0, 18)}... — skipping zombie close`);
+      return;
+    }
+
+    const retries = this._closeRetryCount.get(channelId) ?? 0;
+    if (retries >= SellerPaymentManager.MAX_CLOSE_RETRIES) {
+      debugWarn(`[SellerPayment] Zombie close failed ${retries} times for ${channelId.slice(0, 18)}... — falling back to local eviction`);
+      this._evictStaleChannel(channelId, peerId, 'no auths, past deadline, close retries exhausted', 'timeout');
+      return;
+    }
+
+    this._closingChannels.add(channelId);
+    debugLog(`[SellerPayment] Closing zombie channel ${channelId.slice(0, 18)}... finalAmount=${onChainSettled} (attempt ${retries + 1}/${SellerPaymentManager.MAX_CLOSE_RETRIES})`);
+    try {
+      await this._channelsClient.close(this._signer, channelId, onChainSettled, '0x', '0x');
+      this._closeRetryCount.delete(channelId);
+      this._evictStaleChannel(channelId, peerId, 'zombie closed on-chain', 'settled');
+    } catch (err) {
+      this._closeRetryCount.set(channelId, retries + 1);
+      debugWarn(`[SellerPayment] Zombie close failed (attempt ${retries + 1}): ${err instanceof Error ? err.message : err}`);
+    } finally {
+      this._closingChannels.delete(channelId);
     }
   }
 
@@ -1137,6 +1234,7 @@ export class SellerPaymentManager {
     this._reserveMax.delete(channelId);
     this._pendingTopUp.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
+    this._hydratedChannelIds.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
 
     // Find and remove buyer from active set

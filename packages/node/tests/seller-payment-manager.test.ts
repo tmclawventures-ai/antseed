@@ -652,6 +652,211 @@ describe('SellerPaymentManager', () => {
     expect(manager.hasSession('nonexistent-peer')).toBe(false);
   });
 
+  it('checkTimeouts restores persisted SpendingAuth before zombie close fallback', async () => {
+    const channelId = makeChannelId(69);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+
+    const auth = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 300_000n,
+      cumulativeInputTokens: 10n,
+      cumulativeOutputTokens: 20n,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, auth, mux);
+    manager.recordSpend(channelId, 300_000n);
+
+    const closeSpy = manager.channelsClient.close as ReturnType<typeof vi.fn>;
+    closeSpy.mockRejectedValueOnce(new Error('estimate failed')).mockResolvedValue('0xclose-hash');
+
+    manager.onBuyerDisconnect(buyerIdentity.peerId);
+    while (closeSpy.mock.calls.length === 0) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(store.getChannel(channelId)!.status).toBe('active');
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+    expect(manager.getAcceptedCumulative(channelId)).toBe(0n);
+
+    vi.spyOn(manager.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+
+    await manager.checkTimeouts();
+
+    expect(closeSpy).toHaveBeenCalledTimes(2);
+    const retryArgs = closeSpy.mock.calls[1]!;
+    expect(retryArgs[1]).toBe(channelId);
+    expect(retryArgs[2]).toBe(300_000n);
+    expect(retryArgs[3]).toBe(auth.metadata);
+    expect(retryArgs[4]).toBe(auth.spendingAuthSig);
+    expect(store.getChannel(channelId)!.status).toBe('settled');
+    expect(store.getChannel(channelId)!.settledAmount).toBe('300000');
+  });
+
+  it('checkTimeouts closes zombie channels on-chain without a SpendingAuth', async () => {
+    const channelId = makeChannelId(70);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+    manager.onBuyerDisconnect(buyerIdentity.peerId);
+
+    vi.spyOn(manager.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+
+    await manager.checkTimeouts();
+
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+    const closeArgs = (manager.channelsClient.close as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(closeArgs[1]).toBe(channelId);
+    expect(closeArgs[2]).toBe(0n);
+    expect(closeArgs[3]).toBe('0x');
+    expect(closeArgs[4]).toBe('0x');
+    expect(store.getChannel(channelId)!.status).toBe('settled');
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+  });
+
+  it('checkTimeouts closes hydrated zombie channels after restart', async () => {
+    const channelId = makeChannelId(71);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+
+    const restarted = new SellerPaymentManager(sellerIdentity, {
+      rpcUrl: 'http://127.0.0.1:8545',
+      channelsContractAddress: CONTRACT_ADDR,
+      chainId: CHAIN_ID,
+      dataDir: tempDir,
+    }, store);
+    vi.spyOn(restarted.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+    vi.spyOn(restarted.channelsClient, 'close').mockResolvedValue('0xclose-hash');
+
+    expect(restarted.hasSession(buyerIdentity.peerId)).toBe(true);
+
+    await restarted.checkTimeouts();
+
+    expect(restarted.channelsClient.close).toHaveBeenCalledOnce();
+    const closeArgs = (restarted.channelsClient.close as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(closeArgs[1]).toBe(channelId);
+    expect(closeArgs[2]).toBe(0n);
+    expect(store.getChannel(channelId)!.status).toBe('settled');
+    expect(restarted.hasSession(buyerIdentity.peerId)).toBe(false);
+  });
+
+  it('checkTimeouts retries zombie close failures without local eviction', async () => {
+    const channelId = makeChannelId(72);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+    manager.onBuyerDisconnect(buyerIdentity.peerId);
+
+    vi.spyOn(manager.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+    vi.spyOn(manager.channelsClient, 'close').mockRejectedValue(new Error('estimate failed'));
+
+    await manager.checkTimeouts();
+
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+    expect(store.getChannel(channelId)!.status).toBe('active');
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+  });
+
+  it('checkTimeouts evicts zombie channels after close retries are exhausted', async () => {
+    const channelId = makeChannelId(73);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+    manager.onBuyerDisconnect(buyerIdentity.peerId);
+
+    vi.spyOn(manager.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+    vi.spyOn(manager.channelsClient, 'close').mockRejectedValue(new Error('estimate failed'));
+
+    await manager.checkTimeouts();
+    await manager.checkTimeouts();
+    await manager.checkTimeouts();
+    await manager.checkTimeouts();
+
+    expect(manager.channelsClient.close).toHaveBeenCalledTimes(3);
+    expect(store.getChannel(channelId)!.status).toBe('timeout');
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+  });
+
+  it('checkTimeouts deduplicates concurrent zombie close attempts', async () => {
+    const channelId = makeChannelId(74);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+    manager.onBuyerDisconnect(buyerIdentity.peerId);
+
+    vi.spyOn(manager.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+    let resolveClose!: (value: string) => void;
+    const closePromise = new Promise<string>((resolve) => { resolveClose = resolve; });
+    vi.spyOn(manager.channelsClient, 'close').mockReturnValue(closePromise);
+
+    const first = manager.checkTimeouts();
+    while ((manager.channelsClient.close as ReturnType<typeof vi.fn>).mock.calls.length === 0) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    const second = manager.checkTimeouts();
+
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+    resolveClose('0xclose-hash');
+    await Promise.all([first, second]);
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+  });
+
   it('test_getPaymentRequirements: returns payment requirements payload', () => {
     const req = manager.getPaymentRequirements('test-req-1');
     expect(req).not.toBeNull();
