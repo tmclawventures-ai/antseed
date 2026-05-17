@@ -62,6 +62,7 @@ Use `config.json` for durable node behavior. Use env vars for secrets and tempor
 | `baseUrl` for OpenAI-compatible providers | `ANTSEED_IDENTITY_HEX` |
 | Service list and categories | `ANTSEED_DEBUG=1` |
 | Pricing defaults and per-service pricing | One-off runtime overrides in deployment scripts |
+| `payments.crypto.rpcUrl` for durable RPC config | `ANTSEED_BASE_RPC_URL` for deployment-specific Base RPC endpoints |
 | Buyer proxy port | |
 | Bootstrap nodes | |
 
@@ -310,13 +311,36 @@ For production servers, pass the key from a secrets manager:
 export ANTSEED_IDENTITY_HEX="$(vault kv get -field=key secret/antseed/identity)"
 ```
 
+## Base RPC URL
+
+Sellers should configure a dedicated Base JSON-RPC endpoint for production deployments. Public defaults are fine for testing, but provider RPCs (Alchemy, Infura, QuickNode, self-hosted nodes, etc.) are more reliable for seller registration, staking, reserve, settle, and close transactions.
+
+Use `payments.crypto.rpcUrl` for durable config:
+
+```bash
+antseed config set payments.crypto.rpcUrl "https://base-mainnet.g.alchemy.com/v2/<key>"
+```
+
+Or use runtime overrides when you do not want to edit `config.json`:
+
+```bash
+export ANTSEED_BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
+antseed seller start
+
+# one-off process override
+antseed seller start --base-rpc-url https://base-mainnet.infura.io/v3/<key>
+```
+
+Precedence is: CLI flag, then `ANTSEED_BASE_RPC_URL`, then `payments.crypto.rpcUrl`, then built-in Base defaults.
+
 ## Runtime Environment Variables
 
-Only secrets and global toggles are set via env vars — everything else is in `config.json`.
+Only secrets, global toggles, and deployment-specific runtime overrides are set via env vars — everything else is in `config.json`.
 
 | Variable | Description |
 |---|---|
 | `ANTSEED_IDENTITY_HEX` | Identity private key (64 hex chars, optional 0x prefix) |
+| `ANTSEED_BASE_RPC_URL` | Runtime Base JSON-RPC endpoint override for seller on-chain operations |
 | `ANTHROPIC_API_KEY` | Upstream Anthropic API key (used by the `anthropic` provider plugin) |
 | `OPENAI_API_KEY` | Upstream OpenAI-compatible API key (used by the `openai` provider plugin) |
 | `ANTSEED_SETTLEMENT_IDLE_MS` | Idle time before settling a session (default: 600000 / 10 min) |

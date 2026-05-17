@@ -16,6 +16,16 @@ hide_title: true
 --help                   Show help
 ```
 
+## Seller Start Flags
+
+`antseed seller start` also supports runtime-only overrides for seller operations:
+
+```bash title="seller start"
+--base-rpc-url <url>    Base JSON-RPC endpoint for seller on-chain operations
+```
+
+The same value can be supplied with `ANTSEED_BASE_RPC_URL`. Precedence is: flag, environment variable, `payments.crypto.rpcUrl`, built-in default.
+
 ## Metrics Flags
 
 `antseed metrics serve` also supports:
@@ -40,6 +50,7 @@ See [Metrics](/docs/guides/metrics) for details.
 | `ANTSEED_ENV_FILE` | Override env file path for runtime env loading |
 | ~~`ANTSEED_ALLOWED_SERVICES`~~ | Removed as a user-facing env var. The set of announced services is now derived from the keys under `seller.providers[name].services` in `config.json`. The CLI still injects the env var for plugins internally. |
 | `ANTSEED_ENABLE_SETTLEMENT` | Enable on-chain settlement (`true`/`false`) |
+| `ANTSEED_BASE_RPC_URL` | Base JSON-RPC endpoint override for seller on-chain operations |
 | `ANTSEED_SETTLEMENT_IDLE_MS` | Settlement idle timeout in milliseconds |
 | `ANTSEED_DEFAULT_SESSION_USDC` | Default session authorization amount in USDC |
 | `ANTSEED_AUTO_FUND_DEPOSIT` | Auto-fund deposit on session start (`true`/`false`) |

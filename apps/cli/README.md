@@ -56,6 +56,8 @@ Once your config file exists, the usual seller flow is just:
 ```bash
 export OPENAI_API_KEY=sk-...
 export ANTSEED_IDENTITY_HEX=<your-identity-key>
+# Recommended for production sellers: use a dedicated Base RPC endpoint
+export ANTSEED_BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
 antseed seller start
 ```
 
@@ -208,8 +210,11 @@ Runtime-only overrides (do not write your config file):
 
 ```bash
 antseed seller start --provider anthropic --input-usd-per-million 10 --cached-input-usd-per-million 5 --output-usd-per-million 30
+antseed seller start --base-rpc-url https://base-mainnet.infura.io/v3/<key>
 antseed buyer start --max-input-usd-per-million 20 --max-cached-input-usd-per-million 10 --max-output-usd-per-million 60
 ```
+
+For production sellers, prefer a dedicated Base JSON-RPC endpoint over public defaults. You can set it durably with `payments.crypto.rpcUrl`, at runtime with `ANTSEED_BASE_RPC_URL`, or for one run with `antseed seller start --base-rpc-url <url>`.
 
 ### Session overrides (live, while proxy is running)
 
@@ -304,6 +309,7 @@ Use `base-sepolia` for testing with MockUSDC.
 
 ### Runtime Controls
 
+- `ANTSEED_BASE_RPC_URL=<url>` — custom Base JSON-RPC endpoint for seller on-chain operations (recommended for production)
 - `ANTSEED_SETTLEMENT_IDLE_MS=600000` — idle time before settling a session (default: 10 minutes)
 - `ANTSEED_DEFAULT_DEPOSIT_USDC=1` — default lock amount per session
 - `ANTSEED_IDENTITY_HEX=<hex>` — inject identity via env (supports 0x prefix)

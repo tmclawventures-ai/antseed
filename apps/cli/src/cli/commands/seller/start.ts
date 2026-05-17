@@ -9,8 +9,10 @@ import { AntseedNode, type Provider, resolveChainConfig, loadOrCreateIdentity } 
 import type { PaymentConfig } from '@antseed/node/payments'
 import { checkSellerReadiness, DEFAULT_MIN_SETTLE_DELTA_STR } from '@antseed/node/payments'
 import {
+  ANTSEED_BASE_RPC_URL_ENV,
   createIdentityClient,
   createStakingClient,
+  resolveBaseRpcUrlOverride,
 } from '../../payment-utils.js'
 import type { AntseedConfig } from '../../../config/types.js'
 import { parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery'
@@ -64,6 +66,7 @@ export async function assertSellerPrerequisites(input: {
   paymentsEnabled: boolean
   runtimePricingOverride: boolean
   skipChainChecks: boolean
+  baseRpcUrlOverride?: string
 }): Promise<void> {
   const {
     dataDir,
@@ -73,6 +76,7 @@ export async function assertSellerPrerequisites(input: {
     paymentsEnabled,
     runtimePricingOverride,
     skipChainChecks,
+    baseRpcUrlOverride,
   } = input
 
   const failures: Array<{ title: string; detail: string; command?: string }> = []
@@ -104,8 +108,8 @@ export async function assertSellerPrerequisites(input: {
   if (paymentsEnabled && config.payments.crypto && !skipChainChecks) {
     try {
       const identity = await loadOrCreateIdentity(dataDir)
-      const identityClient = createIdentityClient(config)
-      const stakingClient = createStakingClient(config)
+      const identityClient = createIdentityClient(config, { rpcUrl: baseRpcUrlOverride })
+      const stakingClient = createStakingClient(config, { rpcUrl: baseRpcUrlOverride })
       const sellerContract = config.payments.sellerContract?.address
       const checks = await checkSellerReadiness(identity, identityClient, stakingClient, sellerContract)
       for (const check of checks) {
@@ -306,10 +310,21 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
     .option('--dht-port <number>', 'UDP port for DHT (default: 6881)', parseInt)
     .option('--signaling-port <number>', 'TCP port for P2P signaling (default: 6882)', parseInt)
     .option('--min-settle-delta <usdc>', 'minimum unsettled delta (USDC decimal, e.g. 0.002) before idle settle submits a tx')
+    .option('--base-rpc-url <url>', `runtime-only Base JSON-RPC URL override (also ${ANTSEED_BASE_RPC_URL_ENV})`)
     .option('--skip-prereq-check', 'skip pre-flight checks (services configured, on-chain registration + stake). Use only for local testing.')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(sellerCmd)
       const config = await loadConfig(globalOpts.config)
+      let baseRpcUrlOverride: string | undefined
+      try {
+        baseRpcUrlOverride = resolveBaseRpcUrlOverride({
+          flagValue: options.baseRpcUrl as string | undefined,
+        })
+      } catch (err) {
+        console.error(chalk.red(`Error: ${(err as Error).message}`))
+        process.exit(1)
+      }
+
       const runtimeOverrides = buildSellerRuntimeOverridesFromFlags({
         reserve: options.reserve as number | undefined,
         inputUsdPerMillion: options.inputUsdPerMillion as number | undefined,
@@ -390,10 +405,15 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
       if (preferredMethod === 'crypto') {
         const cc = resolveChainConfig({
           chainId: config.payments.crypto?.chainId,
-          rpcUrl: config.payments.crypto?.rpcUrl,
+          rpcUrl: baseRpcUrlOverride ?? config.payments.crypto?.rpcUrl,
+          fallbackRpcUrls: config.payments.crypto?.fallbackRpcUrls,
           depositsContractAddress: config.payments.crypto?.depositsContractAddress,
           channelsContractAddress: config.payments.crypto?.channelsContractAddress,
+          stakingContractAddress: config.payments.crypto?.stakingContractAddress,
           usdcContractAddress: config.payments.crypto?.usdcContractAddress,
+          identityRegistryAddress: config.payments.crypto?.identityRegistryAddress,
+          emissionsContractAddress: config.payments.crypto?.emissionsContractAddress,
+          subPoolContractAddress: config.payments.crypto?.subPoolContractAddress,
         })
         const defaultLockAmountUSDCBaseUnits = toUSDCBaseUnits(
           config.payments.crypto?.defaultLockAmountUSDC ?? defaultDepositAmountUSDC,
@@ -441,6 +461,7 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
           paymentsEnabled,
           runtimePricingOverride: forcePricingOverride,
           skipChainChecks: Boolean(options.skipPrereqCheck),
+          baseRpcUrlOverride,
         })
       } catch {
         process.exit(1)
@@ -488,6 +509,10 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
       }
       const minBudgetPerRequest = config.payments.minBudgetPerRequest ?? '10000'
       console.log(chalk.dim(`  min budget per request: ${minBudgetPerRequest} base units`))
+      if (paymentConfig?.crypto?.rpcUrl) {
+        const rpcSource = baseRpcUrlOverride ? 'runtime override' : 'config/default'
+        console.log(chalk.dim(`  Base RPC URL: ${paymentConfig.crypto.rpcUrl} (${rpcSource})`))
+      }
       // CLI flag (decimal USDC) overrides config JSON (base-unit string).
       const minSettleDeltaFlag = options.minSettleDelta as string | undefined
       const minSettleDelta = minSettleDeltaFlag !== undefined

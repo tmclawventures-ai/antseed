@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDefaultConfig } from '../../../config/defaults.js';
 import { resolveEffectiveSellerConfig } from '../../../config/effective.js';
+import { requireCryptoConfig, resolveBaseRpcUrlOverride } from '../../payment-utils.js';
 import {
   assertSellerPrerequisites,
   buildSellerRuntimeOverridesFromFlags,
@@ -242,6 +243,38 @@ test('parseOptionalPositiveIntegerEnv accepts positive integer env values', () =
   assert.equal(parseOptionalPositiveIntegerEnv('0'), undefined);
   assert.equal(parseOptionalPositiveIntegerEnv('123abc'), undefined);
   assert.equal(parseOptionalPositiveIntegerEnv('not-a-number'), undefined);
+});
+
+test('resolveBaseRpcUrlOverride uses flag before ANTSEED_BASE_RPC_URL', () => {
+  const env = {
+    ANTSEED_BASE_RPC_URL: 'https://env-rpc.example',
+  } as NodeJS.ProcessEnv;
+
+  assert.equal(
+    resolveBaseRpcUrlOverride({ flagValue: 'https://flag-rpc.example', env }),
+    'https://flag-rpc.example',
+  );
+  assert.equal(
+    resolveBaseRpcUrlOverride({ env }),
+    'https://env-rpc.example',
+  );
+});
+
+test('requireCryptoConfig applies ANTSEED_BASE_RPC_URL over config rpcUrl', () => {
+  const config = createDefaultConfig();
+  config.payments.crypto = {
+    chainId: 'base-mainnet',
+    rpcUrl: 'https://configured-rpc.example',
+    depositsContractAddress: '0x0000000000000000000000000000000000000001',
+    channelsContractAddress: '0x0000000000000000000000000000000000000002',
+    usdcContractAddress: '0x0000000000000000000000000000000000000003',
+  };
+
+  const crypto = requireCryptoConfig(config, {
+    env: { ANTSEED_BASE_RPC_URL: 'https://env-rpc.example' } as NodeJS.ProcessEnv,
+  });
+
+  assert.equal(crypto.rpcUrl, 'https://env-rpc.example');
 });
 
 test('selectSellerProviderNames defaults to all configured providers', () => {
