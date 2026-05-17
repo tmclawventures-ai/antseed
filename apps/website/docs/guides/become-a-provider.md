@@ -110,7 +110,32 @@ export ANTSEED_IDENTITY_HEX=<your-64-char-hex-private-key>
 Use a dedicated key for your provider node. Generate one with any EVM wallet tool. The corresponding address is where you'll receive USDC earnings.
 :::
 
-## 4. Fund Your Wallet
+## 4. Recommended: Set a Custom Base RPC URL
+
+Production sellers should use their own Base JSON-RPC endpoint instead of relying on public defaults. Public RPCs are useful for testing, but they can be rate limited, slow during traffic spikes, or unavailable when your node needs to reserve, settle, register, or stake on-chain.
+
+Set the standard environment variable in your deployment shell:
+
+```bash
+export ANTSEED_BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
+antseed seller start
+```
+
+You can also pass it for a one-off seller run:
+
+```bash
+antseed seller start --base-rpc-url https://base-mainnet.infura.io/v3/<key>
+```
+
+For durable config-file based deployments, store it under `payments.crypto.rpcUrl`:
+
+```bash
+antseed config set payments.crypto.rpcUrl "https://base-mainnet.g.alchemy.com/v2/<key>"
+```
+
+Runtime precedence is: `--base-rpc-url` flag, then `ANTSEED_BASE_RPC_URL`, then `payments.crypto.rpcUrl`, then AntSeed's built-in Base defaults.
+
+## 5. Fund Your Wallet
 
 Your wallet address needs:
 - **ETH** for gas fees (register, stake, settle transactions)
@@ -122,7 +147,7 @@ Send both to the EVM address derived from your identity key. You can find your a
 antseed seller status
 ```
 
-## 5. Register and Stake
+## 6. Register and Stake
 
 ```bash
 # Register your identity on-chain (ERC-8004)
@@ -135,7 +160,7 @@ antseed seller stake 10
 antseed seller status
 ```
 
-## 6. Add Your Services
+## 7. Add Your Services
 
 Everything you announce on the network lives in `config.json` under `seller.providers[name].services[id]`. One block per upstream provider plugin, one entry per service. The `add-service` command builds this for you:
 
@@ -177,7 +202,7 @@ You only have to do this once per service. To see what you've configured:
 antseed config seller show
 ```
 
-## 7. Set Your API Key and Start Selling
+## 8. Set Your API Key and Start Selling
 
 Upstream credentials stay in environment variables. Your provider shape, service list, pricing, and `baseUrl` stay in `config.json`.
 
@@ -204,7 +229,7 @@ Runtime overrides for a one-off session (without editing `config.json`):
 antseed seller start --provider anthropic --input-usd-per-million 3 --output-usd-per-million 15
 ```
 
-## 8. Verify
+## 9. Verify
 
 Once running, your node is discoverable on the network:
 

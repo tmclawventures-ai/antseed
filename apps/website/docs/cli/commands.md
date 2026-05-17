@@ -21,6 +21,8 @@ In normal use, you configure the node once with `antseed seller setup` or `antse
 
 ```bash title="provider"
 antseed seller start                  Start providing AI services
+antseed seller start --base-rpc-url <url>
+                                      Use a custom Base RPC URL for this run
 antseed seller register               Register peer identity on-chain (ERC-8004)
 antseed seller stake <amount>         Stake USDC as a provider (min $10)
 antseed seller unstake                Withdraw staked USDC
