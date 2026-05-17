@@ -283,11 +283,11 @@ describe('SellerPaymentManager', () => {
 
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('accepted');
     expect(manager.hasPendingTopUp(channelId)).toBe(true);
-    expect(manager.getEffectiveReserveMax(channelId)).toBe(2_000_000n);
+    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
 
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp3m, mux)).toBe('accepted');
     expect(manager.hasPendingTopUp(channelId)).toBe(true);
-    expect(manager.getEffectiveReserveMax(channelId)).toBe(3_000_000n);
+    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
     expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
     expect(topUpSpy).toHaveBeenCalledTimes(2);
     expect(topUpSpy.mock.calls[1]?.[5]).toBe(3_000_000n);
@@ -318,17 +318,52 @@ describe('SellerPaymentManager', () => {
     });
 
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('rejected');
-    expect(manager.channelsClient.settle).toHaveBeenCalledOnce();
-    const settleArgs = (manager.channelsClient.settle as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(settleArgs[1]).toBe(channelId);
-    expect(settleArgs[2]).toBe(900_000n);
-    expect(settleArgs[4]).toBe(auth900k.spendingAuthSig);
+    expect(manager.channelsClient.settle).not.toHaveBeenCalled();
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+    const closeArgs = (manager.channelsClient.close as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(closeArgs[1]).toBe(channelId);
+    expect(closeArgs[2]).toBe(900_000n);
+    expect(closeArgs[4]).toBe(auth900k.spendingAuthSig);
     expect(manager.hasPendingTopUp(channelId)).toBe(false);
-    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
-    expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
+    expect(manager.isChannelBlocked(channelId)).toBe(false);
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+    expect(store.getChannel(channelId)!.status).toBe('settled');
   });
 
-  it('rejects an over-ceiling SpendingAuth if the deferred top-up retry fails permanently', async () => {
+  it('blocks the channel if permanent top-up failure cannot close immediately', async () => {
+    const channelId = makeChannelId(105);
+
+    const reservePayload = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reservePayload, mux);
+
+    const auth900k = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 900_000n,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, auth900k, mux);
+    manager.recordSpend(channelId, 900_000n);
+
+    vi.spyOn(manager.channelsClient, 'topUp').mockRejectedValue(new Error('execution reverted: InsufficientBalance'));
+    vi.spyOn(manager.channelsClient, 'close').mockRejectedValue(new Error('close estimate failed'));
+
+    const topUp2m = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '2000000',
+      salt: '0x' + '07'.repeat(32),
+    });
+
+    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('rejected');
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+    expect(manager.hasPendingTopUp(channelId)).toBe(false);
+    expect(manager.isChannelBlocked(channelId)).toBe(true);
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(true);
+    expect(store.getChannel(channelId)!.status).toBe('active');
+  });
+
+  it('closes the channel if a deferred top-up retry fails permanently', async () => {
     const channelId = makeChannelId(104);
 
     const reservePayload = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
@@ -356,25 +391,26 @@ describe('SellerPaymentManager', () => {
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('accepted');
     expect(manager.hasPendingTopUp(channelId)).toBe(true);
 
-    const overCeiling = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
-      cumulativeAmount: 1_500_000n,
-      reserveMaxAmount: '2000000',
+    const withinReserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 950_000n,
+      reserveMaxAmount: '1000000',
     });
-    delete overCeiling.reserveSalt;
-    delete overCeiling.reserveMaxAmount;
-    delete overCeiling.reserveDeadline;
-    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, overCeiling, mux)).toBe('rejected');
+    delete withinReserve.reserveSalt;
+    delete withinReserve.reserveMaxAmount;
+    delete withinReserve.reserveDeadline;
+    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, withinReserve, mux)).toBe('accepted');
 
     expect(topUpSpy).toHaveBeenCalledTimes(2);
-    expect(manager.channelsClient.settle).toHaveBeenCalledOnce();
-    const settleArgs = (manager.channelsClient.settle as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(settleArgs[1]).toBe(channelId);
-    expect(settleArgs[2]).toBe(900_000n);
-    expect(settleArgs[4]).toBe(auth900k.spendingAuthSig);
+    expect(manager.channelsClient.settle).not.toHaveBeenCalled();
+    expect(manager.channelsClient.close).toHaveBeenCalledOnce();
+    const closeArgs = (manager.channelsClient.close as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(closeArgs[1]).toBe(channelId);
+    expect(closeArgs[2]).toBe(950_000n);
+    expect(closeArgs[4]).toBe(withinReserve.spendingAuthSig);
     expect(manager.hasPendingTopUp(channelId)).toBe(false);
-    expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
-    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
-    expect(manager.getAcceptedCumulative(channelId)).toBe(900_000n);
+    expect(manager.isChannelBlocked(channelId)).toBe(false);
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+    expect(store.getChannel(channelId)!.status).toBe('settled');
   });
 
   it('serializes a burst of concurrent SpendingAuth updates and ends at the latest cumulative amount', async () => {
@@ -414,7 +450,7 @@ describe('SellerPaymentManager', () => {
     expect(manager.getAcceptedCumulative(channelId)).toBe(2_000_000n);
   });
 
-  it('validateAndAcceptAuth respects a pending top-up ceiling before the on-chain reserve max is updated', async () => {
+  it('validateAndAcceptAuth ignores pending top-up headroom until on-chain reserve max is updated', async () => {
     const channelId = makeChannelId(102);
 
     const reservePayload = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
@@ -440,15 +476,15 @@ describe('SellerPaymentManager', () => {
     expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('accepted');
     expect(manager.hasPendingTopUp(channelId)).toBe(true);
     expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
-    expect(manager.getEffectiveReserveMax(channelId)).toBe(2_000_000n);
+    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
 
     const followUp = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
       cumulativeAmount: 1_500_000n,
       reserveMaxAmount: '2000000',
     });
 
-    expect(await manager.validateAndAcceptAuth(buyerIdentity.peerId, followUp)).toBe(true);
-    expect(manager.getAcceptedCumulative(channelId)).toBe(1_500_000n);
+    expect(await manager.validateAndAcceptAuth(buyerIdentity.peerId, followUp)).toBe(false);
+    expect(manager.getAcceptedCumulative(channelId)).toBe(900_000n);
   });
 
   it('recovers an active on-chain channel when local seller session is missing', async () => {

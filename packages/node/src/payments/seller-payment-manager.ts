@@ -123,6 +123,9 @@ export class SellerPaymentManager {
    *  subsumes the older request. */
   private readonly _pendingTopUp = new Map<string, { newMaxAmount: bigint; deadline: number; reserveAuthSig: string }>();
 
+  /** Channels that must not serve more paid work until closed/renegotiated. */
+  private readonly _blockedChannels = new Set<string>();
+
   /** channelIds with an in-flight close() tx/estimate. Prevents duplicate close submissions. */
   private readonly _closingChannels = new Set<string>();
 
@@ -254,6 +257,7 @@ export class SellerPaymentManager {
     this._hydratedChannelIds.delete(channelId);
     this._reserveMax.delete(channelId);
     this._pendingTopUp.delete(channelId);
+    this._blockedChannels.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
     this._activeBuyers.delete(peerId);
@@ -574,10 +578,11 @@ export class SellerPaymentManager {
 
           debugWarn(
             `[SellerPayment] Top-up on-chain failed permanently: channel=${channelId.slice(0, 18)}... ` +
-            `kind=${failureKind} error=${this._formatError(topUpErr)} — settling latest auth and rejecting topUp`,
+            `kind=${failureKind} error=${this._formatError(topUpErr)} — closing latest auth and rejecting topUp`,
           );
           this._pendingTopUp.delete(channelId);
-          await this._settleLatestAuth(channelId, 'permanent topUp failure', { respectMinSettleDelta: false });
+          this._blockedChannels.add(channelId);
+          await this.settleSession(buyerPeerId);
           return 'rejected';
         }
         return 'accepted';
@@ -617,43 +622,19 @@ export class SellerPaymentManager {
           return 'rejected';
         }
 
-        // Reject if cumulative exceeds on-chain deposit — the contract would revert
-        // and we'd lose the last valid auth signature that close() could use.
-        // Exception: a retryable pending topUp may temporarily raise the
-        // effective ceiling. Non-retryable failures (notably InsufficientBalance)
-        // must not be treated as headroom or the seller keeps serving unpaid work.
+        // Reject if cumulative exceeds the on-chain deposit. Pending topUps do
+        // not count here: until topUp() succeeds, the extra funds are not
+        // locked, and accepting an over-reserve SpendingAuth would leave the
+        // seller with an auth the contract cannot settle.
         const currentReserveMax = this._reserveMax.get(channelId) ?? 0n;
         const pendingTopUpForCheck = this._pendingTopUp.get(channelId);
-        const effectiveMax = pendingTopUpForCheck
-          ? (pendingTopUpForCheck.newMaxAmount > currentReserveMax ? pendingTopUpForCheck.newMaxAmount : currentReserveMax)
-          : currentReserveMax;
-        if (effectiveMax > 0n && cumulativeAmount > effectiveMax) {
+        if (currentReserveMax > 0n && cumulativeAmount > currentReserveMax) {
           debugWarn(
             `[SellerPayment] Rejecting SpendingAuth exceeding deposit ceiling: ` +
             `cumulative=${cumulativeAmount} > reserveMax=${currentReserveMax}` +
             `${pendingTopUpForCheck ? ` (pending topUp to ${pendingTopUpForCheck.newMaxAmount})` : ''} channel=${channelId.slice(0, 18)}...`,
           );
           return 'rejected';
-        }
-
-        const requiresPendingTopUp = Boolean(
-          pendingTopUpForCheck && currentReserveMax > 0n && cumulativeAmount > currentReserveMax,
-        );
-        if (pendingTopUpForCheck && requiresPendingTopUp) {
-          const retryResult = await this._retryPendingTopUp(
-            channelId,
-            pendingTopUpForCheck,
-            cumulativeAmount,
-            payload.metadata || encodeMetadata(ZERO_METADATA),
-            payload.spendingAuthSig,
-          );
-          if (retryResult === 'permanent-failure') {
-            // The only thing making this auth valid was the pending topUp.
-            // Since that topUp is now known to be impossible, reject before
-            // mutating acceptedCumulative/latestAuth so close() never uses an
-            // over-ceiling SpendingAuth.
-            return 'rejected';
-          }
         }
 
         // Update tracking
@@ -681,13 +662,10 @@ export class SellerPaymentManager {
         debugLog(`[SellerPayment] Budget updated: channel=${channelId.slice(0, 18)}... cumulative=${cumulativeAmount}`);
 
         // Retry any deferred topUp now that we have a higher settle amount.
-        // If the SpendingAuth did not require the pending ceiling to be
-        // accepted, a permanent retry failure is safe to drop after committing
-        // this auth because the auth is still within the current on-chain max.
         const pendingTopUp = this._pendingTopUp.get(channelId);
-        if (pendingTopUp && !requiresPendingTopUp) {
+        if (pendingTopUp) {
           const { amount: retrySettleAmount, metadata: retryMetadata, sig: retrySig } = this._getSettleParams(channelId);
-          await this._retryPendingTopUp(channelId, pendingTopUp, retrySettleAmount, retryMetadata, retrySig);
+          await this._retryPendingTopUp(buyerPeerId, channelId, pendingTopUp, retrySettleAmount, retryMetadata, retrySig);
         }
 
         return 'accepted';
@@ -809,6 +787,7 @@ export class SellerPaymentManager {
   }
 
   private async _retryPendingTopUp(
+    buyerPeerId: string,
     channelId: string,
     pendingTopUp: { newMaxAmount: bigint; deadline: number; reserveAuthSig: string },
     settleAmount: bigint,
@@ -851,9 +830,10 @@ export class SellerPaymentManager {
 
       debugWarn(
         `[SellerPayment] Deferred topUp failed permanently: channel=${channelId.slice(0, 18)}... ` +
-        `kind=${failureKind} error=${this._formatError(retryErr)} — settling latest auth and dropping pending topUp`,
+        `kind=${failureKind} error=${this._formatError(retryErr)} — closing latest auth and dropping pending topUp`,
       );
-      await this._settleLatestAuth(channelId, 'permanent deferred topUp failure', { respectMinSettleDelta: false });
+      this._blockedChannels.add(channelId);
+      await this.settleSession(buyerPeerId);
       return 'permanent-failure';
     }
   }
@@ -1005,6 +985,15 @@ export class SellerPaymentManager {
       return false;
     }
 
+    const reserveMax = this._reserveMax.get(channelId) ?? 0n;
+    if (reserveMax > 0n && newCumulative > reserveMax) {
+      debugWarn(
+        `[SellerPayment] validateAndAcceptAuth: cumulative exceeds reserve ceiling ` +
+        `(${newCumulative} > ${reserveMax}) channel=${channelId.slice(0, 18)}...`,
+      );
+      return false;
+    }
+
     this._hydratedChannelIds.delete(channelId);
 
     // Update if strictly greater
@@ -1130,6 +1119,9 @@ export class SellerPaymentManager {
     this._latestAuth.delete(channelId);
     this._closeRetryCount.delete(channelId);
     this._closingChannels.delete(channelId);
+    this._reserveMax.delete(channelId);
+    this._pendingTopUp.delete(channelId);
+    this._blockedChannels.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
     this._hydratedChannelIds.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
@@ -1282,11 +1274,14 @@ export class SellerPaymentManager {
     return this._reserveMax.get(sessionId) ?? 0n;
   }
 
-  /** Get the effective reserve max, considering pending (not-yet-on-chain) topUps. */
+  /** Get the effective reserve max for serving decisions. Pending topUps do not count until confirmed on-chain. */
   getEffectiveReserveMax(sessionId: string): bigint {
-    const onChain = this._reserveMax.get(sessionId) ?? 0n;
-    const pending = this._pendingTopUp.get(sessionId);
-    return pending && pending.newMaxAmount > onChain ? pending.newMaxAmount : onChain;
+    return this.getReserveMax(sessionId);
+  }
+
+  /** Whether this channel is blocked from serving more paid work. */
+  isChannelBlocked(sessionId: string): boolean {
+    return this._blockedChannels.has(sessionId);
   }
 
   /** Whether a topUp is pending (on-chain call deferred). */
@@ -1362,6 +1357,7 @@ export class SellerPaymentManager {
     this._closingChannels.delete(channelId);
     this._reserveMax.delete(channelId);
     this._pendingTopUp.delete(channelId);
+    this._blockedChannels.delete(channelId);
     this._lastSettledCumulative.delete(channelId);
     this._hydratedChannelIds.delete(channelId);
     this._releaseAcceptedWaiters(channelId);
