@@ -10,11 +10,13 @@ hide_title: true
 
 ```bash title="flags"
 -c, --config <path>     Path to config file (default: ~/.antseed/config.json)
---data-dir <path>       Path to node identity/state directory (default: ~/.antseed)
+--data-dir <path>       Path to node identity/state directory (env: ANTSEED_DATA_DIR, default: ~/.antseed)
 -v, --verbose            Enable verbose logging
 --version                Show version
 --help                   Show help
 ```
+
+`--data-dir` controls buyer/seller identity and runtime state: `identity.key`, `buyer.state.json`, SQLite databases, and payment-channel files. Use a separate data directory for each independent buyer process. The environment-variable equivalent is `ANTSEED_DATA_DIR=<path>`; prefer the explicit flag in service manager commands.
 
 ## Seller Start Flags
 
@@ -46,6 +48,7 @@ See [Metrics](/docs/guides/metrics) for details.
 | Variable | Description |
 |---|---|
 | `ANTSEED_IDENTITY_HEX` | secp256k1 private key (64 hex chars). When set, used instead of `identity.key` file. Cleared from process environment after read. |
+| `ANTSEED_DATA_DIR` | Node identity/state directory when `--data-dir` is not supplied. Use separate values for independent buyer processes. |
 | `ANTSEED_DEBUG` | Enable verbose runtime logs (`0` or `1`) |
 | `ANTSEED_ENV_FILE` | Override env file path for runtime env loading |
 | ~~`ANTSEED_ALLOWED_SERVICES`~~ | Removed as a user-facing env var. The set of announced services is now derived from the keys under `seller.providers[name].services` in `config.json`. The CLI still injects the env var for plugins internally. |

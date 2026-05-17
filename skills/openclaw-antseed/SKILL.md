@@ -66,10 +66,18 @@ Run in a terminal or set up as a persistent service:
 antseed buyer start
 ```
 
+For an isolated OpenClaw buyer, use a dedicated data directory. This is where AntSeed writes `buyer.state.json`, SQLite databases, payment-channel state, and the fallback `identity.key`:
+
+```bash
+export BUYDIR="$HOME/.antseed-buyer-openclaw"
+mkdir -p "$BUYDIR"
+ANTSEED_DATA_DIR="$BUYDIR" antseed --data-dir "$BUYDIR" buyer start
+```
+
 Advanced: if you intentionally want a non-default port:
 
 ```bash
-antseed buyer start --port 5005
+antseed --data-dir "$BUYDIR" buyer start --port 5005
 ```
 
 ### Persistent service (systemd)
@@ -84,13 +92,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$USER
-ExecStart=/usr/bin/env antseed buyer start
+Environment=ANTSEED_IDENTITY_HEX=<private-key-hex-no-0x>
+Environment=ANTSEED_DATA_DIR=%h/.antseed-buyer-openclaw
+ExecStart=/usr/bin/env antseed --data-dir %h/.antseed-buyer-openclaw buyer start
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=antseed-buyer
-Environment=ANTSEED_IDENTITY_HEX=<private-key-hex-no-0x>
 
 [Install]
 WantedBy=multi-user.target

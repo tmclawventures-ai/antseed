@@ -63,7 +63,7 @@ Use `config.json` for durable node behavior. Use env vars for secrets and tempor
 | Service list and categories | `ANTSEED_DEBUG=1` |
 | Pricing defaults and per-service pricing | One-off runtime overrides in deployment scripts |
 | `payments.crypto.rpcUrl` for durable RPC config | `ANTSEED_BASE_RPC_URL` for deployment-specific Base RPC endpoints |
-| Buyer proxy port | |
+| Buyer proxy port | `ANTSEED_DATA_DIR` for per-process buyer state isolation |
 | Bootstrap nodes | |
 
 For example, this is a normal production pattern:
@@ -114,6 +114,24 @@ antseed seller start --provider together --input-usd-per-million 0.7
 ```
 
 That changes only the current process. It does not rewrite `config.json`.
+
+## Data Directory vs Config File
+
+`config.json` controls durable settings, but buyer runtime state is isolated by the data directory. The default data directory is `~/.antseed`; it contains `buyer.state.json`, SQLite databases, payment-channel files, and the fallback `identity.key`.
+
+For each independent buyer node, service integration, isolated test, or concurrent process, use a separate data directory:
+
+```bash
+export BUYDIR="$HOME/.antseed-buyer-myapp"
+mkdir -p "$BUYDIR"
+
+ANTSEED_DATA_DIR="$BUYDIR" \
+antseed --data-dir "$BUYDIR" buyer start \
+  --peer <peer-id> \
+  --port 8380
+```
+
+Prefer `--data-dir` in service/systemd scripts. `ANTSEED_DATA_DIR` is equivalent when the flag is not supplied. If buyer behavior looks stale or files appear in an unexpected place, check the startup log for the resolved data directory and `buyer.state.json` path. Do not rely on `ANTSEED_HOME` for CLI buyer state isolation.
 
 ## Config Sections
 
