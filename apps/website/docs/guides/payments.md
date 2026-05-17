@@ -76,6 +76,17 @@ Settlement happens:
 - **On budget exhaustion** — when a session's reserved amount is used up
 - **On disconnect** — when a buyer disconnects
 
+### Base RPC Endpoint
+
+Production providers should use a dedicated Base JSON-RPC endpoint so reserve, settle, close, register, and stake calls are not dependent on public RPC rate limits.
+
+```bash
+export ANTSEED_BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
+antseed seller start
+```
+
+For a one-off run, use `antseed seller start --base-rpc-url <url>`. For durable config, set `payments.crypto.rpcUrl` in `~/.antseed/config.json`.
+
 ### Staking
 
 Providers must stake a minimum of $10 USDC to participate:

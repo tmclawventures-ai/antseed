@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import type { AntseedConfig } from '../config/types.js';
 import {
   DepositsClient,
   ChannelsClient,
@@ -14,6 +13,51 @@ import {
   ChannelStore,
 } from '@antseed/node/payments';
 import type { Identity } from '@antseed/node';
+import type { AntseedConfig } from '../config/types.js';
+
+export const ANTSEED_BASE_RPC_URL_ENV = 'ANTSEED_BASE_RPC_URL';
+
+export interface RpcUrlOverrideInput {
+  /** Runtime-only CLI flag value. Wins over environment variables. */
+  flagValue?: string;
+  /** Environment to read from. Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface CryptoConfigOverrides {
+  /** Runtime-only RPC URL override. Wins over environment variables and config.json. */
+  rpcUrl?: string;
+  /** Environment to read ANTSEED_BASE_RPC_URL from. Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+}
+
+function normalizeRpcUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`${ANTSEED_BASE_RPC_URL_ENV} must be a valid http(s) URL`);
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${ANTSEED_BASE_RPC_URL_ENV} must use http:// or https://`);
+  }
+
+  return trimmed;
+}
+
+/**
+ * Resolve the runtime Base JSON-RPC URL override used by seller infrastructure.
+ * Precedence: CLI flag > ANTSEED_BASE_RPC_URL env var > config/defaults.
+ */
+export function resolveBaseRpcUrlOverride(input: RpcUrlOverrideInput = {}): string | undefined {
+  return normalizeRpcUrl(
+    input.flagValue ?? (input.env ?? process.env)[ANTSEED_BASE_RPC_URL_ENV],
+  );
+}
 
 /** Format ANTS token amounts (18 decimals) to human-readable string. */
 export function formatAnts(baseUnits: bigint): string {
@@ -60,16 +104,27 @@ export async function loadCryptoContext(dataDir: string): Promise<CryptoContext>
  * Validate that crypto payment config is present and return it.
  * Exits with error if not configured.
  */
-export function requireCryptoConfig(config: AntseedConfig): NonNullable<AntseedConfig['payments']['crypto']> & { evmChainId: number } {
+export function requireCryptoConfig(
+  config: AntseedConfig,
+  overrides: CryptoConfigOverrides = {},
+): NonNullable<AntseedConfig['payments']['crypto']> & { evmChainId: number } {
   const crypto = config.payments?.crypto;
   if (!crypto) {
     throw new Error('No crypto payment configuration found. Configure payments.crypto in your config file.');
   }
-  // Merge with chain-config defaults so commands work with just chainId
-  const resolved = resolveChainConfig(crypto);
+
+  const rpcUrlOverride = normalizeRpcUrl(overrides.rpcUrl)
+    ?? resolveBaseRpcUrlOverride({ env: overrides.env });
+
+  // Merge with chain-config defaults so commands work with just chainId.
+  // Runtime RPC overrides intentionally win over config.json and built-ins.
+  const resolved = resolveChainConfig({
+    ...crypto,
+    ...(rpcUrlOverride ? { rpcUrl: rpcUrlOverride } : {}),
+  });
   return {
     ...crypto,
-    rpcUrl: crypto.rpcUrl || resolved.rpcUrl,
+    rpcUrl: rpcUrlOverride || crypto.rpcUrl || resolved.rpcUrl,
     ...(resolved.fallbackRpcUrls && resolved.fallbackRpcUrls.length > 0
       ? { fallbackRpcUrls: resolved.fallbackRpcUrls }
       : {}),
@@ -92,8 +147,8 @@ function fallbackClientOpts(crypto: ReturnType<typeof requireCryptoConfig>) {
 /**
  * Create a DepositsClient from the CLI config.
  */
-export function createDepositsClient(config: AntseedConfig): DepositsClient {
-  const crypto = requireCryptoConfig(config);
+export function createDepositsClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): DepositsClient {
+  const crypto = requireCryptoConfig(config, overrides);
   return new DepositsClient({
     rpcUrl: crypto.rpcUrl,
     ...fallbackClientOpts(crypto),
@@ -106,8 +161,8 @@ export function createDepositsClient(config: AntseedConfig): DepositsClient {
 /**
  * Create a ChannelsClient from the CLI config.
  */
-export function createChannelsClient(config: AntseedConfig): ChannelsClient {
-  const crypto = requireCryptoConfig(config);
+export function createChannelsClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): ChannelsClient {
+  const crypto = requireCryptoConfig(config, overrides);
   return new ChannelsClient({
     rpcUrl: crypto.rpcUrl,
     ...fallbackClientOpts(crypto),
@@ -119,8 +174,8 @@ export function createChannelsClient(config: AntseedConfig): ChannelsClient {
 /**
  * Create an IdentityClient from the CLI config.
  */
-export function createIdentityClient(config: AntseedConfig): IdentityClient {
-  const crypto = requireCryptoConfig(config);
+export function createIdentityClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): IdentityClient {
+  const crypto = requireCryptoConfig(config, overrides);
   if (!crypto.identityRegistryAddress) {
     throw new Error('No identity registry address configured. Set payments.crypto.identityRegistryAddress in your config file.');
   }
@@ -135,8 +190,8 @@ export function createIdentityClient(config: AntseedConfig): IdentityClient {
 /**
  * Create a StakingClient from the CLI config.
  */
-export function createStakingClient(config: AntseedConfig): StakingClient {
-  const crypto = requireCryptoConfig(config);
+export function createStakingClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): StakingClient {
+  const crypto = requireCryptoConfig(config, overrides);
   if (!crypto.stakingContractAddress) {
     throw new Error('No staking contract address configured. Set payments.crypto.stakingContractAddress in your config file.');
   }
@@ -152,8 +207,8 @@ export function createStakingClient(config: AntseedConfig): StakingClient {
 /**
  * Create an EmissionsClient from the CLI config.
  */
-export function createEmissionsClient(config: AntseedConfig): EmissionsClient {
-  const crypto = requireCryptoConfig(config);
+export function createEmissionsClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): EmissionsClient {
+  const crypto = requireCryptoConfig(config, overrides);
   if (!crypto.emissionsContractAddress) {
     throw new Error('No emissions contract address configured. Set payments.crypto.emissionsContractAddress in your config file.');
   }
@@ -168,8 +223,8 @@ export function createEmissionsClient(config: AntseedConfig): EmissionsClient {
 /**
  * Create a SubPoolClient from the CLI config.
  */
-export function createSubPoolClient(config: AntseedConfig): SubPoolClient {
-  const crypto = requireCryptoConfig(config);
+export function createSubPoolClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): SubPoolClient {
+  const crypto = requireCryptoConfig(config, overrides);
   if (!crypto.subPoolContractAddress) {
     throw new Error('No subscription pool contract address configured. Set payments.crypto.subPoolContractAddress in your config file.');
   }
