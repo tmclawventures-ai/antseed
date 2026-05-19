@@ -948,8 +948,10 @@ export class BuyerPaymentManager {
     // Send topUp AFTER the SpendingAuth so the seller processes the higher
     // cumulative first — this ensures the on-chain settle amount meets the
     // contract's TopUpThresholdNotMet requirement (85% of deposit must be
-    // settleable before topUp is allowed).
-    if (needsTopUp) {
+    // settleable before topUp is allowed). Also proactively send the top-up
+    // once the signed cumulative reaches the buyer's 65% threshold; the seller
+    // may defer the on-chain topUp until the contract's 85% gate is satisfied.
+    if (needsTopUp || this._needsTopUp(sellerPeerId)) {
       await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'handleNeedAuth');
     }
   }
