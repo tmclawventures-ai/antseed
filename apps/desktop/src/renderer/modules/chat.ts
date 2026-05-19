@@ -2248,9 +2248,33 @@ export function initChatModule({
       peerId = selectedOption?.peerId || '';
     }
     uiState.chatSelectedPeerId = peerId;
+
+    const decoded = decodeChatServiceSelection(value);
+    const nextServiceId = normalizeChatServiceId(selectedOption?.id ?? decoded.id);
+    const nextProvider = normalizeProviderId(selectedOption?.provider ?? decoded.provider);
+
     if (activeConversation) {
       activeConversation.peerId = peerId || undefined;
       activeConversation.peerLabel = selectedOption?.peerDisplayName || selectedOption?.peerLabel || undefined;
+
+      if (nextServiceId) {
+        activeConversation.service = nextServiceId;
+        activeConversation.provider = nextProvider ?? '';
+      }
+
+      const convId = activeConversation.id;
+      if (convId && Array.isArray(uiState.chatConversations)) {
+        const list = uiState.chatConversations as ChatConversationSummary[];
+        const summary = list.find((c) => c.id === convId);
+        if (summary) {
+          summary.peerId = peerId || '';
+          summary.peerLabel = activeConversation.peerLabel ?? '';
+          if (nextServiceId) {
+            summary.service = nextServiceId;
+            summary.provider = nextProvider ?? '';
+          }
+        }
+      }
     }
     if (bridge?.chatAiSelectPeer) {
       void bridge.chatAiSelectPeer({
