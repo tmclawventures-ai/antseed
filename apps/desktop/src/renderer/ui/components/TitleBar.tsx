@@ -103,30 +103,33 @@ export function TitleBar() {
       </div>
       <div className={styles.titleBarRight}>
         {updateState && (
-          updateState.status === 'ready' ? (
-            <button
-              className={styles.titleBarUpdateBtn}
-              onClick={handleUpdate}
-              aria-label={`Install v${updateState.version} and restart`}
-              title={`Install v${updateState.version} and restart`}
-            >
-              Update to v{updateState.version}
-            </button>
-          ) : (
-            <button
-              className={`${styles.titleBarUpdateBtn} ${styles.titleBarUpdateBtnDownloading}`}
-              disabled
-              aria-label={`Downloading v${updateState.version} ${updateState.percent}%`}
-              title={`Downloading v${updateState.version} — ${updateState.percent}%`}
-            >
-              <span className={styles.titleBarUpdateFill} style={{ width: `${updateState.percent}%` }} aria-hidden="true" />
-              <span className={styles.titleBarUpdateLabel}>Downloading v{updateState.version} · {updateState.percent}%</span>
-            </button>
-          )
+          <div className={styles.titleBarCenter}>
+            {updateState.status === 'ready' ? (
+              <button
+                className={`${styles.titleBarUpdateBadge} ${styles.titleBarUpdateBadgeReady}`}
+                onClick={handleUpdate}
+                aria-label={`Install v${updateState.version} and restart`}
+                title={`Click to install v${updateState.version} and restart`}
+              >
+                <span className={styles.titleBarUpdateDot} />
+                Update to v{updateState.version}
+              </button>
+            ) : (
+              <button
+                className={`${styles.titleBarUpdateBadge} ${styles.titleBarUpdateBadgeDownloading}`}
+                disabled
+                aria-label={`Downloading v${updateState.version} ${updateState.percent}%`}
+                title={`Downloading v${updateState.version} — ${updateState.percent}%`}
+              >
+                <span className={styles.titleBarUpdateFill} style={{ width: `${updateState.percent}%` }} aria-hidden="true" />
+                <span className={styles.titleBarUpdateLabel}>
+                  <span className={styles.titleBarUpdateDot} />
+                  Downloading v{updateState.version} · {updateState.percent}%
+                </span>
+              </button>
+            )}
+          </div>
         )}
-        <div className={styles.alphaHint}>
-          Alpha Version
-        </div>
         <div className={styles.titleBarCreditsWrapper}>
           <button
             className={styles.titleBarCreditsBtn}
