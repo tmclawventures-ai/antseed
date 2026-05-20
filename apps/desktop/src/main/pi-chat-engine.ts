@@ -1517,14 +1517,6 @@ function normalizePaymentBody(body: Record<string, unknown>): Record<string, unk
 }
 
 
-function toConversationTitle(userMessage: string): string {
-  const normalized = userMessage.trim();
-  if (normalized.length === 0) {
-    return 'New conversation';
-  }
-  return normalized.slice(0, 60) + (normalized.length > 60 ? '...' : '');
-}
-
 function sanitizeGeneratedConversationTitle(value: unknown): string | null {
   const cleaned = String(value ?? '')
     .trim()
@@ -1540,6 +1532,41 @@ function sanitizeGeneratedConversationTitle(value: unknown): string | null {
   return cleaned.slice(0, 60).trim();
 }
 
+function titleTextFromContent(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((block) => {
+    if (typeof block === 'string') return block;
+    if (!block || typeof block !== 'object') return '';
+    const data = block as Record<string, unknown>;
+    return typeof data.text === 'string'
+      ? data.text
+      : typeof data.output_text === 'string'
+        ? data.output_text
+        : '';
+  }).join('');
+}
+
+function getMessageText(message: Message | null | undefined): string {
+  if (!message) return '';
+  return titleTextFromContent((message as unknown as Record<string, unknown>).content).trim();
+}
+
+function legacyFallbackTitleForMessage(messageText: string): string {
+  const normalized = messageText.trim();
+  if (!normalized) return 'New conversation';
+  return normalized.slice(0, 60) + (normalized.length > 60 ? '...' : '');
+}
+
+function shouldGenerateConversationTitleForSession(sessionName: string | undefined, firstUserMessage: string): boolean {
+  const current = sessionName?.trim() ?? '';
+  if (!current || current === 'Conversation' || current === 'New Chat' || current === 'New conversation') {
+    return true;
+  }
+  const legacyFallback = legacyFallbackTitleForMessage(firstUserMessage);
+  return current === legacyFallback;
+}
+
 function extractGeneratedTitleFromResponse(protocol: ChatServiceProtocol, body: unknown): string | null {
   if (!body || typeof body !== 'object') return null;
   const data = body as Record<string, unknown>;
@@ -1547,7 +1574,10 @@ function extractGeneratedTitleFromResponse(protocol: ChatServiceProtocol, body: 
   if (protocol === 'openai-chat-completions') {
     const choice = Array.isArray(data.choices) ? data.choices[0] as Record<string, unknown> | undefined : undefined;
     const message = choice?.message as Record<string, unknown> | undefined;
-    return sanitizeGeneratedConversationTitle(message?.content);
+    return sanitizeGeneratedConversationTitle(
+      titleTextFromContent(message?.content)
+        || titleTextFromContent(choice?.text),
+    );
   }
 
   if (protocol === 'openai-responses') {
@@ -1561,8 +1591,7 @@ function extractGeneratedTitleFromResponse(protocol: ChatServiceProtocol, body: 
         ? (item as Record<string, unknown>).content as Record<string, unknown>[]
         : [];
       for (const block of content) {
-        const text = block.text ?? block.output_text;
-        const title = sanitizeGeneratedConversationTitle(text);
+        const title = sanitizeGeneratedConversationTitle(titleTextFromContent([block]));
         if (title) return title;
       }
     }
@@ -1578,28 +1607,74 @@ function extractGeneratedTitleFromResponse(protocol: ChatServiceProtocol, body: 
   return null;
 }
 
+function extractGeneratedTitleFromResponsesSse(text: string): string | null {
+  let eventName = '';
+  let dataLines: string[] = [];
+  let streamedText = '';
+
+  const flushEvent = (): string | null => {
+    if (dataLines.length === 0) return null;
+    const dataText = dataLines.join('\n').trim();
+    const event = eventName;
+    eventName = '';
+    dataLines = [];
+    if (!dataText || dataText === '[DONE]') return null;
+
+    try {
+      const data = JSON.parse(dataText) as Record<string, unknown>;
+      const type = typeof data.type === 'string' ? data.type : event;
+      if (type === 'response.output_text.delta' && typeof data.delta === 'string') {
+        streamedText += data.delta;
+        return null;
+      }
+      if (type === 'response.output_text.done' && typeof data.text === 'string') {
+        return sanitizeGeneratedConversationTitle(data.text);
+      }
+      if (type === 'response.completed') {
+        return extractGeneratedTitleFromResponse('openai-responses', data.response ?? data);
+      }
+    } catch {
+      // Ignore malformed SSE records and fall back to accumulated deltas.
+    }
+    return null;
+  };
+
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    if (line === '') {
+      const title = flushEvent();
+      if (title) return title;
+      continue;
+    }
+    if (line.startsWith('event:')) {
+      eventName = line.slice('event:'.length).trim();
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice('data:'.length).trimStart());
+    }
+  }
+
+  return flushEvent() ?? sanitizeGeneratedConversationTitle(streamedText);
+}
+
 async function generateConversationTitleWithModel({
   proxyPort,
   serviceId,
   protocol,
   peerId,
   userMessage,
-  assistantMessage,
 }: {
   proxyPort: number;
   serviceId: string;
   protocol: ChatServiceProtocol;
   peerId: string | null;
   userMessage: string;
-  assistantMessage?: string;
 }): Promise<string | null> {
+  const titleInstructions = 'You write short, accurate chat titles.';
   const prompt = [
     'Create a concise title for this chat conversation.',
     'Rules: 3-6 words, no quotes, no period, title case only if natural, return only the title.',
     '',
     `User message:\n${userMessage.slice(0, 4000)}`,
-    assistantMessage ? `\nAssistant response summary/context:\n${assistantMessage.slice(0, 2000)}` : '',
-  ].filter(Boolean).join('\n');
+  ].join('\n');
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     authorization: `Bearer ${PROXY_RUNTIME_API_KEY}`,
@@ -1610,8 +1685,8 @@ async function generateConversationTitleWithModel({
   let url = `${LOCALHOST_URL}:${proxyPort}/v1/messages`;
   let body: Record<string, unknown> = {
     model: serviceId,
-    max_tokens: 32,
-    system: 'You write short, accurate chat titles.',
+    max_tokens: 64,
+    system: titleInstructions,
     messages: [{ role: 'user', content: prompt }],
   };
 
@@ -1619,20 +1694,21 @@ async function generateConversationTitleWithModel({
     url = `${LOCALHOST_URL}:${proxyPort}/v1/chat/completions`;
     body = {
       model: serviceId,
-      max_tokens: 32,
+      max_tokens: 256,
       messages: [
-        { role: 'system', content: 'You write short, accurate chat titles. Return only the title.' },
+        { role: 'system', content: `${titleInstructions} Return only the title.` },
         { role: 'user', content: prompt },
       ],
     };
   } else if (protocol === 'openai-responses') {
     url = `${LOCALHOST_URL}:${proxyPort}/v1/responses`;
+    headers.accept = 'text/event-stream';
     body = {
       model: serviceId,
-      max_output_tokens: 128,
-      reasoning: { effort: 'minimal' },
-      instructions: 'You write short, accurate chat titles. Return only the title.',
-      input: [{ role: 'user', content: prompt }],
+      max_output_tokens: 64,
+      instructions: titleInstructions,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
+      stream: true,
     };
   }
 
@@ -1645,17 +1721,16 @@ async function generateConversationTitleWithModel({
     signal: controller.signal,
   }).finally(() => clearTimeout(timeout));
   if (!response.ok) return null;
-  return extractGeneratedTitleFromResponse(protocol, await response.json());
-}
 
-function getMessageTextForTitle(message: AiChatMessage | null | undefined): string {
-  if (!message) return '';
-  if (typeof message.content === 'string') return message.content;
-  return message.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n')
-    .trim();
+  if (protocol === 'openai-responses') {
+    return extractGeneratedTitleFromResponsesSse(await response.text());
+  }
+
+  try {
+    return extractGeneratedTitleFromResponse(protocol, await response.json());
+  } catch {
+    return null;
+  }
 }
 
 export function registerPiChatHandlers({
@@ -1933,11 +2008,11 @@ export function registerPiChatHandlers({
     await session.setModel(proxyModel);
     session.agent.sessionId = conversationId;
 
-    const existingUserMessages = session.messages.filter((message) => message.role === 'user').length;
-    const shouldGenerateConversationTitle = existingUserMessages === 0;
-    if (shouldGenerateConversationTitle && (!session.sessionName || session.sessionName.trim().length === 0)) {
-      session.setSessionName(toConversationTitle(trimmedMessage));
-    }
+    const firstUserMessageText = getMessageText(session.messages.find((message) => message.role === 'user')) || trimmedMessage;
+    const shouldGenerateConversationTitle = shouldGenerateConversationTitleForSession(
+      session.sessionName,
+      firstUserMessageText,
+    );
 
     const turnMetaQueue: AiMessageMeta[] = [];
     const toolArgsById = new Map<string, Record<string, unknown>>();
@@ -2284,7 +2359,6 @@ export function registerPiChatHandlers({
         }
       }
 
-      const completedAssistantMessage = pendingAssistantMessage;
       if (pendingAssistantMessage) {
         sendToRenderer('chat:ai-done', {
           conversationId,
@@ -2299,14 +2373,14 @@ export function registerPiChatHandlers({
 
       if (shouldGenerateConversationTitle) {
         try {
-          const title = await generateConversationTitleWithModel({
+          let title = await generateConversationTitleWithModel({
             proxyPort,
             serviceId,
             protocol,
             peerId: preferredPeerId,
-            userMessage: trimmedMessage,
-            assistantMessage: getMessageTextForTitle(completedAssistantMessage),
+            userMessage: firstUserMessageText,
           });
+
           if (title) {
             session.setSessionName(title);
             sendToRenderer('chat:conversation-title-updated', { conversationId, title });
