@@ -477,6 +477,7 @@ ipcMain.handle('app:get-setup-status', () => ({
 // language list, not the OS UI language, and can disagree on multilingual
 // systems.
 ipcMain.handle('app:get-system-locale', () => app.getLocale());
+ipcMain.handle('app:get-version', () => app.getVersion());
 
 ipcMain.handle('identity:get', async () => {
   try {

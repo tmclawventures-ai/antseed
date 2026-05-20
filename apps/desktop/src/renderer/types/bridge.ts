@@ -137,6 +137,8 @@ export type DesktopBridge = {
     | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd';
   /** Authoritative macOS UI locale (Electron `app.getLocale()`). */
   getSystemLocale?: () => Promise<string>;
+  /** Current app version from Electron `app.getVersion()`. */
+  getAppVersion?: () => Promise<string>;
   getState?: () => Promise<RuntimeSnapshot>;
   start?: (options: StartOptions) => Promise<unknown>;
   stop?: (mode: RuntimeMode) => Promise<unknown>;
@@ -188,6 +190,7 @@ export type DesktopBridge = {
   onChatAiDone?: (handler: (data: { conversationId: string; message: { role: string; content: unknown; createdAt?: number; meta?: Record<string, unknown> } }) => void) => () => void;
   onChatAiError?: (handler: (data: { conversationId: string; error: string }) => void) => () => void;
   onChatAiUserPersisted?: (handler: (data: { conversationId: string; message: { role: string; content: unknown; createdAt?: number } }) => void) => () => void;
+  onChatConversationTitleUpdated?: (handler: (data: { conversationId: string; title: string }) => void) => () => void;
   onChatAiStreamStart?: (handler: (data: { conversationId: string; turn: number }) => void) => () => void;
   onChatAiStreamDelta?: (handler: (data: { conversationId: string; index: number; blockType: string; text: string }) => void) => () => void;
   onChatAiStreamBlockStart?: (handler: (data: { conversationId: string; index: number; blockType: string; toolId?: string; toolName?: string }) => void) => () => void;
