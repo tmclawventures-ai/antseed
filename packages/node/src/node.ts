@@ -250,6 +250,8 @@ export class AntseedNode extends EventEmitter {
   private _sessionTracker: SellerSessionTracker | null = null;
   /** Buyer-side background full discovery sweep, if one is running. */
   private _backgroundPeerDiscoveryPromise: Promise<PeerInfo[]> | null = null;
+  /** Serializes non-blocking on-chain enrichment for incrementally discovered peers. */
+  private _partialPeerEnrichmentChain: Promise<void> = Promise.resolve();
 
   constructor(config: NodeConfig) {
     super();
@@ -536,6 +538,7 @@ export class AntseedNode extends EventEmitter {
           + ` emitted ${peers.length} peer(s) from ${context.endpointCount} endpoint(s)`,
         );
         this.emit("peers:discovered", peers);
+        this._queuePartialPeerEnrichment(peers);
       });
       debugLog(`[Node] Background DHT sweep returned ${results.length} result(s)`);
       const peers = await this._lookupResultsToPeerInfos(results);
@@ -546,6 +549,30 @@ export class AntseedNode extends EventEmitter {
       return [];
     }).finally(() => {
       this._backgroundPeerDiscoveryPromise = null;
+    });
+  }
+
+  private _queuePartialPeerEnrichment(peers: PeerInfo[]): void {
+    if (peers.length === 0 || !this._channelsClient || !this._stakingClient) {
+      return;
+    }
+    const peersToEnrich = peers.map((peer) => ({ ...peer }));
+    this._partialPeerEnrichmentChain = this._partialPeerEnrichmentChain.then(async () => {
+      if (!this._started || !this._channelsClient || !this._stakingClient) {
+        return;
+      }
+      await this._enrichPeersWithOnChainStats(peersToEnrich);
+      if (!this._started) {
+        return;
+      }
+      const enriched = peersToEnrich.filter((peer) => typeof peer.onChainStatsFetchedAt === "number");
+      if (enriched.length === 0) {
+        return;
+      }
+      debugLog(`[Node] Background DHT partial on-chain enrichment emitted ${enriched.length} peer(s)`);
+      this.emit("peers:discovered", enriched);
+    }).catch((err) => {
+      debugWarn(`[Node] Background DHT partial on-chain enrichment failed: ${err instanceof Error ? err.message : err}`);
     });
   }
 
