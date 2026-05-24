@@ -150,7 +150,7 @@ export interface NodeConfig {
   signalingPort?: number;     // Default: 6882 for seller
   bootstrapNodes?: Array<{ host: string; port: number }>;
   requestTimeoutMs?: number;  // Default: 30000
-  /** Timeout in ms for each HTTP metadata fetch during peer discovery. Default: 750 */
+  /** Timeout in ms for each HTTP metadata fetch during peer discovery. Default: 1500 */
   metadataFetchTimeoutMs?: number;
   /** Maximum buffered body size (bytes) while reconstructing streaming responses. Default: 16 MiB. */
   maxStreamBufferBytes?: number;
@@ -508,16 +508,28 @@ export class AntseedNode extends EventEmitter {
     return filtered;
   }
 
+  startBackgroundPeerDiscoverySweep(): void {
+    this._startBackgroundPeerDiscoverySweep();
+  }
+
   private _startBackgroundPeerDiscoverySweep(): void {
     if (!this._peerLookup || this._backgroundPeerDiscoveryPromise) {
       return;
     }
     const peerLookup = this._peerLookup;
+    const emittedPeerIds = new Set<string>();
     debugLog(`[Node] Starting background exhaustive peer discovery sweep`);
     this._backgroundPeerDiscoveryPromise = (async () => {
       const results = await peerLookup.findAllExhaustive(async (partialResults, context) => {
         if (partialResults.length === 0) return;
-        const peers = await this._lookupResultsToPeerInfos(partialResults);
+        const peers: PeerInfo[] = [];
+        for (const result of partialResults) {
+          const peer = this._lookupResultToPeerInfo(result);
+          if (emittedPeerIds.has(peer.peerId)) continue;
+          emittedPeerIds.add(peer.peerId);
+          peers.push(peer);
+        }
+        if (peers.length === 0) return;
         debugLog(
           `[Node] Background DHT partial ${context.phase}`
           + `${context.subnet !== undefined ? ` ${context.subnet}/${SUBNET_COUNT - 1}` : ""}`
@@ -1187,7 +1199,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create PeerLookup with HttpMetadataResolver
     const metadataResolver = new HttpMetadataResolver({
-      timeoutMs: this._config.metadataFetchTimeoutMs ?? 750,
+      timeoutMs: this._config.metadataFetchTimeoutMs ?? 1500,
       maxConcurrent: 24,
     });
     const lookupConfig: LookupConfig = {

@@ -1,7 +1,7 @@
 import type { AntseedConfig } from './types.js';
 
 export const DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS = 5 * 60_000;
-export const DEFAULT_BUYER_METADATA_FETCH_TIMEOUT_MS = 750;
+export const DEFAULT_BUYER_METADATA_FETCH_TIMEOUT_MS = 1500;
 
 /**
  * Create a default Antseed configuration with sensible defaults.

@@ -174,7 +174,7 @@ Pricing is configured in USD per 1M tokens with role-specific defaults and optio
     },
     "proxyPort": 8377,
     "peerRefreshIntervalMs": 300000,
-    "metadataFetchTimeoutMs": 750
+    "metadataFetchTimeoutMs": 1500
   }
 }
 ```
