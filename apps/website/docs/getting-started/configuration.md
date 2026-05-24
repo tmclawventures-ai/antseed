@@ -265,7 +265,7 @@ The buyer proxy refreshes its discovered peer cache from the DHT in the backgrou
 antseed config buyer set peerRefreshIntervalMs 300000
 ```
 
-Each discovered endpoint is then queried over HTTP for signed peer metadata. The default per-endpoint metadata fetch timeout is 750ms; raise it for high-latency networks or lower it to make discovery skip slow/offline endpoints faster:
+Each discovered endpoint is then queried over HTTP for signed peer metadata. The default per-endpoint metadata fetch timeout is 1500ms; raise it for high-latency networks or lower it to make discovery skip slow/offline endpoints faster:
 
 ```bash
 antseed config buyer set metadataFetchTimeoutMs 1500
